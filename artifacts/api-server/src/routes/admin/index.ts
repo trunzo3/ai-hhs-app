@@ -1,4 +1,5 @@
 import { Router, type IRouter } from "express";
+import { spawn } from "child_process";
 import { db, usersTable, conversationMetadataTable, responseRatingsTable, feedbackTable, appConfigTable, tokenUsageTable, corpusDocumentsTable, systemPromptsTable } from "@workspace/db";
 import { eq, count, avg, desc, and } from "drizzle-orm";
 import { sql } from "drizzle-orm";
@@ -309,6 +310,45 @@ router.get("/admin/trends", requireAdmin, async (req, res): Promise<void> => {
     req.log.error({ err }, "Failed to fetch trends");
     res.status(500).json({ error: "Failed to fetch trends" });
   }
+});
+
+router.get("/admin/backup", requireAdmin, async (req, res): Promise<void> => {
+  const dbUrl = process.env.DATABASE_URL;
+  if (!dbUrl) {
+    res.status(500).json({ error: "DATABASE_URL is not configured" });
+    return;
+  }
+
+  const timestamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+  const filename = `aiforrhhs-backup-${timestamp}.sql`;
+
+  res.setHeader("Content-Type", "application/octet-stream");
+  res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+  res.setHeader("Cache-Control", "no-store");
+
+  const pgDump = spawn("pg_dump", ["--no-password", "--format=plain", "--no-owner", "--no-acl", dbUrl], {
+    env: { ...process.env, PGPASSWORD: "" },
+  });
+
+  pgDump.stdout.pipe(res);
+
+  pgDump.stderr.on("data", (data) => {
+    logger.warn({ msg: data.toString() }, "pg_dump stderr");
+  });
+
+  pgDump.on("error", (err) => {
+    logger.error({ err }, "pg_dump spawn error");
+    if (!res.headersSent) {
+      res.status(500).json({ error: "Failed to start pg_dump" });
+    }
+  });
+
+  pgDump.on("close", (code) => {
+    if (code !== 0) {
+      logger.error({ code }, "pg_dump exited with non-zero code");
+    }
+    res.end();
+  });
 });
 
 export default router;

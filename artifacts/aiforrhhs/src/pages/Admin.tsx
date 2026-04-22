@@ -167,6 +167,8 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
   const [feedbackSortDir, setFeedbackSortDir] = useState<"asc" | "desc">("desc");
   const [thresholdInput, setThresholdInput] = useState("");
   const [savingConfig, setSavingConfig] = useState(false);
+  const [backupLoading, setBackupLoading] = useState(false);
+  const [backupError, setBackupError] = useState<string | null>(null);
 
   /* ── Corpus state ── */
   const [corpusDocs, setCorpusDocs] = useState<CorpusDocMeta[]>([]);
@@ -256,6 +258,34 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
     await fetch("/api/admin/config", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ spendThreshold: val }) });
     setStats((prev) => prev ? { ...prev, spendThreshold: val } : prev);
     setSavingConfig(false);
+  };
+
+  const handleDownloadBackup = async () => {
+    setBackupLoading(true);
+    setBackupError(null);
+    try {
+      const res = await fetch("/api/admin/backup", { headers: { "x-admin-auth": "authenticated" } });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: "Backup failed" }));
+        throw new Error(err.error || "Backup failed");
+      }
+      const blob = await res.blob();
+      const disposition = res.headers.get("Content-Disposition") ?? "";
+      const match = disposition.match(/filename="([^"]+)"/);
+      const filename = match ? match[1] : "aiforrhhs-backup.sql";
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err: any) {
+      setBackupError(err?.message ?? "Download failed. Please try again.");
+    } finally {
+      setBackupLoading(false);
+    }
   };
 
   const handleToggleDisabled = async (userId: string, disabled: boolean) => {
@@ -788,6 +818,17 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
                   )}
                 </>
               )}
+            </div>
+
+            {/* 4. Data Backup */}
+            <div style={cardStyle}>
+              <div style={sectionTitleStyle}>Data Backup</div>
+              <p style={{ fontSize: 13, color: "#6B7280", margin: "-8px 0 20px", lineHeight: 1.6 }}>Download a complete SQL snapshot of all data — users, corpus, system prompt, feedback, ratings, and settings. Keep this file secure; it contains all registered user information.</p>
+              <button onClick={handleDownloadBackup} disabled={backupLoading} style={{ ...btnStyle("#1A2744", backupLoading), display: "inline-flex", alignItems: "center", gap: 8 }}>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>
+                {backupLoading ? "Generating…" : "Download Backup"}
+              </button>
+              {backupError && <div style={{ marginTop: 12, padding: "10px 14px", background: "#FEF2F2", color: "#DC2626", borderRadius: 8, fontSize: 13 }}>{backupError}</div>}
             </div>
           </>
         )}
