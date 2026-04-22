@@ -19,7 +19,10 @@ import {
 } from "@workspace/api-zod";
 import { logger } from "../../lib/logger";
 
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+const anthropic = new Anthropic({
+  apiKey: process.env.AI_INTEGRATIONS_ANTHROPIC_API_KEY ?? process.env.ANTHROPIC_API_KEY,
+  baseURL: process.env.AI_INTEGRATIONS_ANTHROPIC_BASE_URL,
+});
 
 const router: IRouter = Router();
 
@@ -142,9 +145,15 @@ router.post("/chat/message", requireAuth, async (req, res): Promise<void> => {
 
     res.write(`data: ${JSON.stringify({ done: true, followUps })}\n\n`);
     res.end();
-  } catch (err) {
+  } catch (err: any) {
     req.log.error({ err }, "Error calling Anthropic API");
-    res.write(`data: ${JSON.stringify({ error: "Something went wrong. Please try again." })}\n\n`);
+    let errorMessage = "Something went wrong. Please try again.";
+    if (err?.status === 400 && err?.message?.includes("credit balance")) {
+      errorMessage = "The AI service is temporarily unavailable due to account limits. Please contact the administrator.";
+    } else if (err?.status === 529 || err?.status === 503) {
+      errorMessage = "The AI service is overloaded. Please wait a moment and try again.";
+    }
+    res.write(`data: ${JSON.stringify({ error: errorMessage })}\n\n`);
     res.end();
   }
 });

@@ -151,6 +151,14 @@ export default function Chat() {
                 return msgs;
               });
             }
+            if (data.error) {
+              assistantContent = data.error;
+              setMessages((prev) => {
+                const msgs = [...prev];
+                msgs[msgs.length - 1].content = data.error;
+                return msgs;
+              });
+            }
             if (data.done && data.followUps) followUps = data.followUps;
           } catch (e) {
             console.error("SSE parse error", e);
@@ -269,7 +277,7 @@ export default function Chat() {
                     )}
                   </div>
 
-                  {idx > 0 && !isStreaming && idx === messages.length - 1 && (
+                  {idx > 0 && !isStreaming && idx === messages.length - 1 && msg.content && (
                     <div style={{ display: "flex", alignItems: "center", gap: 2, marginTop: 6 }}>
                       <ActionBtn onClick={() => handleCopy(msg.content)} testId={`btn-copy-${idx}`} label="Copy">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#444" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
