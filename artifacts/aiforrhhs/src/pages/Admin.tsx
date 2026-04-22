@@ -90,7 +90,7 @@ export default function Admin() {
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
-    if (loginEmail === "anthony@iqmeeteq.com" && loginPassword === "95682") {
+    if (loginEmail.toLowerCase() === "anthony@iqmeeteq.com" && loginPassword === "95682") {
       sessionStorage.setItem("adminAuth", "true");
       setAdminAuthenticated(true);
       setIsAuthenticated(true);
