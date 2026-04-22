@@ -84,8 +84,23 @@ export default function Admin() {
     if (auth === "true") {
       setAdminAuthenticated(true);
       setIsAuthenticated(true);
+      setIsCheckingAuth(false);
+      return;
     }
-    setIsCheckingAuth(false);
+    // Auto-authenticate if the main app session belongs to the admin
+    fetch("/api/auth/me")
+      .then(async (res) => {
+        if (res.ok) {
+          const data = await res.json();
+          if (data?.email?.toLowerCase() === "anthony@iqmeeteq.com") {
+            sessionStorage.setItem("adminAuth", "true");
+            setAdminAuthenticated(true);
+            setIsAuthenticated(true);
+          }
+        }
+      })
+      .catch(() => {})
+      .finally(() => setIsCheckingAuth(false));
   }, []);
 
   const handleLogin = (e: React.FormEvent) => {
