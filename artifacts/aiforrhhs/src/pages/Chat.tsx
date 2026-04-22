@@ -313,6 +313,10 @@ export default function Chat() {
         .md-body table { border-collapse: collapse; width: 100%; margin: 8px 0; font-size: 13px; }
         .md-body th, .md-body td { border: 1px solid #D1D5DB; padding: 6px 10px; text-align: left; }
         .md-body th { background: #F9FAFB; font-weight: 600; }
+        @keyframes thinking-bounce {
+          0%, 80%, 100% { transform: translateY(0); opacity: 0.4; }
+          40% { transform: translateY(-7px); opacity: 1; }
+        }
       `}</style>
 
       {/* ── HEADER ── */}
@@ -353,7 +357,11 @@ export default function Chat() {
                       <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
                     ) : (
                       isStreaming && idx === messages.length - 1 ? (
-                        <Loader2 size={16} style={{ color: "#C8963E", display: "inline-block", verticalAlign: "middle" }} className="animate-spin" />
+                        <div style={{ display: "flex", alignItems: "center", gap: 5, padding: "6px 0" }}>
+                          {[0, 1, 2, 3, 4].map((n) => (
+                            <span key={n} style={{ display: "inline-block", width: 9, height: 9, borderRadius: "50%", background: "#444444", animation: `thinking-bounce 1.2s ease-in-out ${n * 0.18}s infinite` }} />
+                          ))}
+                        </div>
                       ) : null
                     )}
                   </div>

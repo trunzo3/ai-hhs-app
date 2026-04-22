@@ -492,11 +492,11 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
               {stats.taskLauncherUsage.length === 0 ? <p style={{ color: "#9CA3AF", fontSize: 13, margin: 0 }}>No task launcher taps yet.</p> : (
                 <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
                   {stats.taskLauncherUsage.map((t, i) => (
-                    <div key={i} style={{ display: "flex", alignItems: "center", gap: 14 }}>
-                      <span style={{ fontSize: 12, fontWeight: 700, color: "#6B7280", width: 22, textAlign: "right", flexShrink: 0 }}>#{i + 1}</span>
-                      <span style={{ fontSize: 13, color: "#374151", flex: "0 0 220px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.label}</span>
-                      <div style={{ flex: 1, height: 10, background: "#F3F4F6", borderRadius: 5 }}><div style={{ height: "100%", width: `${Math.round((t.count / maxTask) * 100)}%`, background: "#C8963E", borderRadius: 5 }} /></div>
-                      <span style={{ fontSize: 13, fontWeight: 600, width: 32, textAlign: "right", flexShrink: 0 }}>{t.count}</span>
+                    <div key={i} style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: "#6B7280", width: 20, textAlign: "right", flexShrink: 0 }}>{i + 1}</span>
+                      <span style={{ fontSize: 13, color: "#374151", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.label}</span>
+                      <div style={{ width: 200, flexShrink: 0, height: 10, background: "#F3F4F6", borderRadius: 5 }}><div style={{ height: "100%", width: `${Math.round((t.count / maxTask) * 100)}%`, background: "#C8963E", borderRadius: 5 }} /></div>
+                      <span style={{ fontSize: 13, fontWeight: 600, width: 28, textAlign: "right", flexShrink: 0, color: "#111827" }}>{t.count}</span>
                     </div>
                   ))}
                 </div>
