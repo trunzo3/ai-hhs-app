@@ -64,6 +64,7 @@ export default function Chat() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
+  const [isThinking, setIsThinking] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
 
@@ -158,6 +159,7 @@ export default function Chat() {
     if (fileInputRef.current) fileInputRef.current.value = "";
     if (textareaRef.current) { textareaRef.current.style.height = "auto"; }
     setIsStreaming(true);
+    setIsThinking(true);
 
     const controller = new AbortController();
     abortControllerRef.current = controller;
@@ -192,6 +194,7 @@ export default function Chat() {
           try {
             const data = JSON.parse(dataStr);
             if (data.token) {
+              if (!assistantContent) setIsThinking(false);
               assistantContent += data.token;
               setMessages((prev) => {
                 const msgs = [...prev];
@@ -200,6 +203,7 @@ export default function Chat() {
               });
             }
             if (data.error) {
+              setIsThinking(false);
               assistantContent = data.error;
               setMessages((prev) => {
                 const msgs = [...prev];
@@ -230,6 +234,7 @@ export default function Chat() {
       });
     } finally {
       setIsStreaming(false);
+      setIsThinking(false);
       abortControllerRef.current = null;
     }
   };
@@ -355,15 +360,7 @@ export default function Chat() {
                   <div className="md-body" style={{ maxWidth: "88%", color: "#1A2744", fontSize: 14, lineHeight: 1.75 }}>
                     {msg.content ? (
                       <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
-                    ) : (
-                      isStreaming && idx === messages.length - 1 ? (
-                        <div style={{ display: "flex", alignItems: "center", gap: 5, padding: "6px 0" }}>
-                          {[0, 1, 2, 3, 4].map((n) => (
-                            <span key={n} style={{ display: "inline-block", width: 9, height: 9, borderRadius: "50%", background: "#444444", animation: `thinking-bounce 1.2s ease-in-out ${n * 0.18}s infinite` }} />
-                          ))}
-                        </div>
-                      ) : null
-                    )}
+                    ) : null}
                   </div>
 
                   {idx > 0 && !isStreaming && idx === messages.length - 1 && msg.content && (
@@ -391,6 +388,14 @@ export default function Chat() {
               )}
             </div>
           ))}
+
+          {isThinking && (
+            <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 0", marginBottom: 8 }}>
+              {[0, 1, 2, 3, 4].map((n) => (
+                <span key={n} style={{ display: "inline-block", width: 9, height: 9, borderRadius: "50%", background: "#444444", animation: `thinking-bounce 1.2s ease-in-out ${n * 0.18}s infinite` }} />
+              ))}
+            </div>
+          )}
 
           {isInitialState && (
             <>
