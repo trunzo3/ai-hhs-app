@@ -1,21 +1,26 @@
-import OpenAI from "openai";
-import { db, corpusChunksTable } from "@workspace/db";
+import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { logger } from "./logger";
 
-const openai = new OpenAI({ apiKey: process.env.ANTHROPIC_API_KEY || process.env.OPENAI_API_KEY });
-
-const EMBEDDING_MODEL = "text-embedding-3-small";
 const MAX_CHUNKS = 3;
-const TOKEN_BUDGET = 4000;
+
+let _extractor: any = null;
+
+async function getExtractor() {
+  if (!_extractor) {
+    logger.info("Loading local embedding model...");
+    const { pipeline } = await import("@xenova/transformers");
+    _extractor = await pipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2");
+    logger.info("Embedding model loaded");
+  }
+  return _extractor;
+}
 
 export async function embedText(text: string): Promise<number[]> {
   try {
-    const response = await openai.embeddings.create({
-      model: EMBEDDING_MODEL,
-      input: text,
-    });
-    return response.data[0].embedding;
+    const extractor = await getExtractor();
+    const output = await extractor(text, { pooling: "mean", normalize: true });
+    return Array.from(output.data) as number[];
   } catch (err) {
     logger.error({ err }, "Failed to embed text");
     return [];
@@ -45,10 +50,7 @@ export async function retrieveRelevantChunks(query: string): Promise<string[]> {
   }
 }
 
-export async function ingestDocument(
-  docId: string,
-  content: string
-): Promise<void> {
+export async function ingestDocument(docId: string, content: string): Promise<void> {
   const CHUNK_SIZE = 300;
   const OVERLAP = 50;
   const words = content.split(/\s+/);
@@ -56,8 +58,7 @@ export async function ingestDocument(
 
   let i = 0;
   while (i < words.length) {
-    const chunk = words.slice(i, i + CHUNK_SIZE).join(" ");
-    chunks.push(chunk);
+    chunks.push(words.slice(i, i + CHUNK_SIZE).join(" "));
     i += CHUNK_SIZE - OVERLAP;
   }
 
@@ -66,7 +67,6 @@ export async function ingestDocument(
   for (let idx = 0; idx < chunks.length; idx++) {
     const embedding = await embedText(chunks[idx]);
     if (embedding.length === 0) continue;
-
     const embeddingStr = `[${embedding.join(",")}]`;
     await db.execute(sql`
       INSERT INTO corpus_chunks (id, doc_id, chunk_index, content, embedding, created_at)

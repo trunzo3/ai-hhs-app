@@ -71,13 +71,13 @@ scripts/           # Ingest corpus script
 - `conversation_metadata` — id, userId, startedAt, messageCount, taskLauncherUsed, corpusDocsRetrieved
 - `response_ratings` — id, conversationId, userId, rating (up/down), messageIndex
 - `feedback` — id, userId, feedbackType, detail, attemptedFileSize
-- `corpus_chunks` — id, docId, chunkIndex, content, embedding (vector 1536), with HNSW index
+- `corpus_chunks` — id, docId, chunkIndex, content, embedding (vector 384), with HNSW index
 - `app_config` — key/value pairs (active_model, spend_threshold)
 - `token_usage` — monthly token tracking with estimated cost
 
 ### Key Libraries
 
-- **Backend**: Express 5, express-session, Anthropic SDK, argon2 (password hashing), Drizzle ORM
+- **Backend**: Express 5, express-session, Anthropic SDK, argon2 (password hashing), Drizzle ORM, @xenova/transformers (local embeddings via all-MiniLM-L6-v2, 384-dim)
 - **Frontend**: React 18, Vite, Wouter (routing), TanStack Query, React Hook Form, shadcn/ui, Lucide icons
 - **Dev**: TypeScript 5.9, Orval (codegen), Drizzle Kit (migrations), pino (logging)
 

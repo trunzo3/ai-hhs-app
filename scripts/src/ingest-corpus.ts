@@ -1,16 +1,24 @@
 import { readdirSync, readFileSync } from "fs";
 import { join, basename } from "path";
-import OpenAI from "openai";
 import pg from "pg";
 
 const { Pool } = pg;
 
-async function embedText(openai: OpenAI, text: string): Promise<number[]> {
-  const response = await openai.embeddings.create({
-    model: "text-embedding-3-small",
-    input: text,
-  });
-  return response.data[0].embedding;
+let _extractor: any = null;
+
+async function getExtractor() {
+  if (!_extractor) {
+    const { pipeline } = await import("@xenova/transformers");
+    _extractor = await pipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2");
+    console.log("Embedding model loaded.");
+  }
+  return _extractor;
+}
+
+async function embedText(text: string): Promise<number[]> {
+  const extractor = await getExtractor();
+  const output = await extractor(text, { pooling: "mean", normalize: true });
+  return Array.from(output.data) as number[];
 }
 
 function chunkText(content: string, chunkSize = 300, overlap = 50): string[] {
@@ -18,18 +26,13 @@ function chunkText(content: string, chunkSize = 300, overlap = 50): string[] {
   const chunks: string[] = [];
   let i = 0;
   while (i < words.length) {
-    const chunk = words.slice(i, i + chunkSize).join(" ");
-    chunks.push(chunk);
+    chunks.push(words.slice(i, i + chunkSize).join(" "));
     i += chunkSize - overlap;
   }
   return chunks;
 }
 
-async function ingestDirectory(
-  pool: pg.Pool,
-  openai: OpenAI,
-  dir: string
-): Promise<void> {
+async function ingestDirectory(pool: pg.Pool, dir: string): Promise<void> {
   const files = readdirSync(dir).filter((f) => f.endsWith(".md"));
   for (const file of files) {
     const docId = basename(file, ".md");
@@ -41,7 +44,7 @@ async function ingestDirectory(
     await pool.query("DELETE FROM corpus_chunks WHERE doc_id = $1", [docId]);
 
     for (let i = 0; i < chunks.length; i++) {
-      const embedding = await embedText(openai, chunks[i]);
+      const embedding = await embedText(chunks[i]);
       const embeddingStr = `[${embedding.join(",")}]`;
       await pool.query(
         "INSERT INTO corpus_chunks (id, doc_id, chunk_index, content, embedding, created_at) VALUES (gen_random_uuid(), $1, $2, $3, $4::vector, NOW())",
@@ -53,17 +56,13 @@ async function ingestDirectory(
 }
 
 async function main() {
-  if (!process.env.DATABASE_URL) {
-    throw new Error("DATABASE_URL is required");
-  }
-  if (!process.env.ANTHROPIC_API_KEY) {
-    throw new Error("ANTHROPIC_API_KEY is required");
-  }
+  if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL is required");
+
+  console.log("Initializing embedding model (downloading if needed ~23MB)...");
 
   const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-  const openai = new OpenAI({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-  const corpusRoot = join(process.cwd(), "corpus");
+  const corpusRoot = process.env.CORPUS_ROOT ?? join(new URL("../../corpus", import.meta.url).pathname);
   const dirs = [
     join(corpusRoot, "methodology"),
     join(corpusRoot, "task-chains"),
@@ -73,7 +72,7 @@ async function main() {
 
   for (const dir of dirs) {
     try {
-      await ingestDirectory(pool, openai, dir);
+      await ingestDirectory(pool, dir);
     } catch (err: any) {
       if (err.code === "ENOENT") {
         console.log(`Skipping ${dir} (not found)`);
