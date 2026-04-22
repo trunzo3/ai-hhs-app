@@ -166,6 +166,16 @@ export default function Chat() {
         }
       }
 
+      const jsonCleanMatch = assistantContent.match(/\s*\{"followUps":\s*\[[\s\S]*?\]\}\s*$/);
+      if (jsonCleanMatch) {
+        assistantContent = assistantContent.replace(jsonCleanMatch[0], "").trimEnd();
+        setMessages((prev) => {
+          const msgs = [...prev];
+          msgs[msgs.length - 1].content = assistantContent;
+          return msgs;
+        });
+      }
+
       if (followUps.length > 0) {
         setMessages((prev) => {
           const msgs = [...prev];
@@ -224,7 +234,7 @@ export default function Chat() {
         borderBottom: "1px solid rgba(255,255,255,0.08)",
       }}>
         <h1 style={{ fontFamily: "'DM Serif Display', serif", fontSize: 20, fontWeight: 700, color: "#C8963E", margin: 0 }}>
-          AIforHHS
+          AI for HHS
         </h1>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <button
@@ -389,7 +399,7 @@ export default function Chat() {
             </button>
           </form>
           <div style={{ textAlign: "center", marginTop: 6 }}>
-            <span style={{ fontSize: 10, color: "#9CA3AF" }}>AIforHHS can make mistakes. Verify important information.</span>
+            <span style={{ fontSize: 10, color: "#9CA3AF" }}>AI for HHS can make mistakes. Verify important information.</span>
           </div>
         </div>
       </div>
@@ -404,7 +414,7 @@ function TaskCard({ title, desc, onClick, testId }: { title: string; desc: strin
       onClick={onClick}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
-      style={{ background: hovered ? "#E2E6ED" : "#EEF0F4", border: "1px solid #D8DCE3", borderRadius: 10, padding: "14px 16px", textAlign: "left", cursor: "pointer", fontFamily: "'DM Sans', sans-serif", transition: "background 0.15s" }}
+      style={{ background: hovered ? "#C4DAFC" : "#DBEAFE", border: "1px solid #BFDBFE", borderRadius: 10, padding: "14px 16px", textAlign: "left", cursor: "pointer", fontFamily: "'DM Sans', sans-serif", transition: "background 0.15s" }}
       data-testid={testId}
     >
       <div style={{ fontSize: 14, fontWeight: 500, color: "#1A2744", marginBottom: 4 }}>{title}</div>

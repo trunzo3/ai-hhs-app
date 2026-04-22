@@ -1,15 +1,12 @@
 import { Router, type IRouter } from "express";
 import { db, usersTable, conversationMetadataTable, responseRatingsTable, feedbackTable, appConfigTable, tokenUsageTable } from "@workspace/db";
-import { eq, count, avg, sum, desc } from "drizzle-orm";
+import { eq, count, avg, sum, desc, and } from "drizzle-orm";
 import { sql } from "drizzle-orm";
 import { getActiveModel, getSpendThreshold, getCurrentMonth, getCurrentMonthSpend } from "../../lib/tokenTracker";
 import { UpdateAdminConfigBody } from "@workspace/api-zod";
 import { logger } from "../../lib/logger";
 
 const router: IRouter = Router();
-
-const ADMIN_EMAIL = "anthony@iqmeeteq.com";
-const ADMIN_PASSWORD = "95682";
 
 function requireAdmin(req: any, res: any, next: any): void {
   const authHeader = req.headers["x-admin-auth"];
@@ -22,7 +19,26 @@ function requireAdmin(req: any, res: any, next: any): void {
 
 router.get("/admin/stats", requireAdmin, async (req, res): Promise<void> => {
   try {
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+
     const [{ totalUsers }] = await db.select({ totalUsers: count() }).from(usersTable);
+
+    const [{ newThisMonth }] = await db
+      .select({ newThisMonth: count() })
+      .from(usersTable)
+      .where(sql`${usersTable.createdAt} >= ${startOfMonth}`);
+
+    const [{ weeklyActive }] = await db
+      .select({ weeklyActive: sql<number>`COUNT(DISTINCT ${conversationMetadataTable.userId})::int` })
+      .from(conversationMetadataTable)
+      .where(sql`${conversationMetadataTable.startedAt} >= ${weekAgo}`);
+
+    const [{ unmatchedDomainsThisWeek }] = await db
+      .select({ unmatchedDomainsThisWeek: count() })
+      .from(usersTable)
+      .where(and(eq(usersTable.domainMatch, false), sql`${usersTable.createdAt} >= ${weekAgo}`));
 
     const usersByCounty = await db
       .select({ label: usersTable.county, count: count() })
@@ -48,6 +64,14 @@ router.get("/admin/stats", requireAdmin, async (req, res): Promise<void> => {
     const [{ avgMessages }] = await db
       .select({ avgMessages: avg(conversationMetadataTable.messageCount) })
       .from(conversationMetadataTable);
+
+    const convCountsRaw = await db
+      .select({ userId: conversationMetadataTable.userId, convCount: count() })
+      .from(conversationMetadataTable)
+      .groupBy(conversationMetadataTable.userId);
+
+    const returningUsers = convCountsRaw.filter((r) => r.convCount > 1).length;
+    const oneTimeUsers = convCountsRaw.filter((r) => r.convCount === 1).length;
 
     const taskLauncherUsageRaw = await db
       .select({
@@ -80,27 +104,15 @@ router.get("/admin/stats", requireAdmin, async (req, res): Promise<void> => {
 
     const activeModel = await getActiveModel();
     const spendThreshold = await getSpendThreshold();
-    const { spend: currentMonthSpend } = await getCurrentMonthSpend();
-
-    const recentActivityRaw = await db
-      .select({
-        county: usersTable.county,
-        lastActivity: sql<string>`MAX(${usersTable.lastActive})`,
-        userCount: count(),
-      })
-      .from(usersTable)
-      .groupBy(usersTable.county)
-      .orderBy(desc(sql`MAX(${usersTable.lastActive})`))
-      .limit(10);
-
-    const recentActivityByCounty = recentActivityRaw.map((r) => ({
-      county: r.county,
-      lastActivity: r.lastActivity ?? new Date().toISOString(),
-      userCount: r.userCount,
-    }));
+    const { spend: currentMonthSpend, tokens: currentMonthTokens } = await getCurrentMonthSpend();
 
     res.json({
       totalUsers,
+      newThisMonth,
+      weeklyActive,
+      unmatchedDomainsThisWeek,
+      returningUsers,
+      oneTimeUsers,
       usersByCounty,
       usersByServiceCategory,
       unmatchedDomainCount,
@@ -111,9 +123,9 @@ router.get("/admin/stats", requireAdmin, async (req, res): Promise<void> => {
       thumbsDownCount,
       feedbackCount,
       currentMonthSpend,
+      currentMonthTokens,
       activeModel,
       spendThreshold,
-      recentActivityByCounty,
     });
   } catch (err) {
     req.log.error({ err }, "Failed to fetch admin stats");
@@ -122,46 +134,87 @@ router.get("/admin/stats", requireAdmin, async (req, res): Promise<void> => {
 });
 
 router.get("/admin/users", requireAdmin, async (req, res): Promise<void> => {
-  const users = await db
-    .select({
-      id: usersTable.id,
-      email: usersTable.email,
-      county: usersTable.county,
-      serviceCategory: usersTable.serviceCategory,
-      domainMatch: usersTable.domainMatch,
-      domainNote: usersTable.domainNote,
-      createdAt: usersTable.createdAt,
-      lastActive: usersTable.lastActive,
-    })
-    .from(usersTable)
-    .orderBy(desc(usersTable.createdAt));
+  try {
+    const users = await db
+      .select({
+        id: usersTable.id,
+        email: usersTable.email,
+        county: usersTable.county,
+        serviceCategory: usersTable.serviceCategory,
+        domainMatch: usersTable.domainMatch,
+        domainNote: usersTable.domainNote,
+        disabled: usersTable.disabled,
+        createdAt: usersTable.createdAt,
+        lastActive: usersTable.lastActive,
+        conversationCount: sql<number>`(SELECT COUNT(*) FROM conversation_metadata WHERE conversation_metadata.user_id = ${usersTable.id})::int`,
+      })
+      .from(usersTable)
+      .orderBy(desc(usersTable.createdAt));
 
-  res.json(
-    users.map((u) => ({
-      ...u,
-      createdAt: u.createdAt.toISOString(),
-      lastActive: u.lastActive?.toISOString() ?? null,
-    }))
-  );
+    res.json(
+      users.map((u) => ({
+        ...u,
+        createdAt: u.createdAt.toISOString(),
+        lastActive: u.lastActive?.toISOString() ?? null,
+      }))
+    );
+  } catch (err) {
+    req.log.error({ err }, "Failed to fetch admin users");
+    res.status(500).json({ error: "Failed to fetch users" });
+  }
+});
+
+router.patch("/admin/users/:id", requireAdmin, async (req, res): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const { disabled } = req.body;
+
+    if (typeof disabled !== "boolean") {
+      res.status(400).json({ error: "disabled must be a boolean" });
+      return;
+    }
+
+    await db.update(usersTable).set({ disabled }).where(eq(usersTable.id, id));
+
+    res.json({ success: true });
+  } catch (err) {
+    req.log.error({ err }, "Failed to update user status");
+    res.status(500).json({ error: "Failed to update user" });
+  }
 });
 
 router.get("/admin/feedback", requireAdmin, async (req, res): Promise<void> => {
-  const entries = await db
-    .select()
-    .from(feedbackTable)
-    .orderBy(desc(feedbackTable.createdAt))
-    .limit(100);
+  try {
+    const entries = await db
+      .select({
+        id: feedbackTable.id,
+        userId: feedbackTable.userId,
+        userEmail: usersTable.email,
+        feedbackType: feedbackTable.feedbackType,
+        detail: feedbackTable.detail,
+        attemptedFileSize: feedbackTable.attemptedFileSize,
+        createdAt: feedbackTable.createdAt,
+      })
+      .from(feedbackTable)
+      .leftJoin(usersTable, eq(feedbackTable.userId, usersTable.id))
+      .orderBy(desc(feedbackTable.createdAt))
+      .limit(100);
 
-  res.json(
-    entries.map((e) => ({
-      id: e.id,
-      userId: e.userId,
-      feedbackType: e.feedbackType,
-      detail: e.detail ?? null,
-      attemptedFileSize: e.attemptedFileSize ?? null,
-      createdAt: e.createdAt.toISOString(),
-    }))
-  );
+    res.json(
+      entries.map((e) => ({
+        id: e.id,
+        userId: e.userId,
+        userEmail: e.userEmail ?? "unknown",
+        feedbackType: e.feedbackType,
+        detail: e.detail ?? null,
+        attemptedFileSize: e.attemptedFileSize ?? null,
+        createdAt: e.createdAt.toISOString(),
+      }))
+    );
+  } catch (err) {
+    req.log.error({ err }, "Failed to fetch admin feedback");
+    res.status(500).json({ error: "Failed to fetch feedback" });
+  }
 });
 
 router.get("/admin/config", requireAdmin, async (req, res): Promise<void> => {

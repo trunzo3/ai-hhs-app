@@ -77,6 +77,11 @@ router.post("/auth/login", async (req, res): Promise<void> => {
     return;
   }
 
+  if (user.disabled) {
+    res.status(403).json({ error: "Your account has been paused. If you think this is an error, reach out to anthony@iqmeeteq.com." });
+    return;
+  }
+
   (req.session as any).userId = user.id;
 
   await db.update(usersTable).set({ lastActive: new Date() }).where(eq(usersTable.id, user.id));
@@ -110,6 +115,12 @@ router.get("/auth/me", async (req, res): Promise<void> => {
   const [user] = await db.select().from(usersTable).where(eq(usersTable.id, userId));
   if (!user) {
     res.status(401).json({ error: "User not found" });
+    return;
+  }
+
+  if (user.disabled) {
+    req.session.destroy(() => {});
+    res.status(403).json({ error: "Your account has been paused. If you think this is an error, reach out to anthony@iqmeeteq.com." });
     return;
   }
 

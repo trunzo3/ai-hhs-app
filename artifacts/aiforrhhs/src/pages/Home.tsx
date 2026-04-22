@@ -124,12 +124,12 @@ export default function Home() {
     <div className="min-h-screen bg-sidebar text-foreground flex flex-col items-center justify-center p-4">
       <div className="w-full max-w-md space-y-8">
         <div className="text-center">
-          <h1 className="font-serif text-4xl text-primary font-bold tracking-tight">AIforHHS</h1>
+          <h1 className="font-serif text-4xl text-primary font-bold tracking-tight">AI for HHS</h1>
         </div>
 
         <div className="px-4 py-4 rounded-lg border border-primary/40 bg-primary/10 text-center">
           <p className="font-sans text-sm font-semibold text-white leading-snug">
-            AIforHHS never stores your conversations. Avoid entering client names, case numbers, or other identifying information.
+            AI for HHS never stores your conversations. Avoid entering client names, case numbers, or other identifying information.
           </p>
         </div>
 

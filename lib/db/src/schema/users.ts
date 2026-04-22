@@ -10,6 +10,7 @@ export const usersTable = pgTable("users", {
   serviceCategory: text("service_category").notNull(),
   domainMatch: boolean("domain_match").notNull().default(false),
   domainNote: text("domain_note"),
+  disabled: boolean("disabled").notNull().default(false),
   resetToken: text("reset_token"),
   resetExpires: timestamp("reset_expires", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -20,6 +21,7 @@ export const insertUserSchema = createInsertSchema(usersTable).omit({
   id: true,
   createdAt: true,
   lastActive: true,
+  disabled: true,
   resetToken: true,
   resetExpires: true,
 });

@@ -1,0 +1,74 @@
+This prompt covers chat interface fixes, a name change, and a full admin dashboard build.
+CHAT FIXES:
+
+The assistant responses are showing raw JSON at the end of each message, like: {"followUps":["I'll give you the details","Help me figure out what to say"]}. The follow-up buttons are rendering correctly from this JSON, but the raw JSON text should not appear in the response. Strip the JSON from the displayed message text — only show it as the follow-up pill buttons.
+The task launcher cards on the opening screen blend into the background too much. Change the card background color from the current light gray to a more distinct light blue — try #DBEAFE or #D6E4F5. They should clearly stand out from the page background as tappable elements.
+
+NAME CHANGE:
+
+Change "AIforHHS" to "AI for HHS" (with spaces) everywhere it appears — the login/registration page header, the chat interface header, and the admin dashboard header.
+
+DISABLED USER LOGIN:
+
+Add a "disabled" boolean field to the users table in the database, defaulting to false. When a disabled user tries to log in, reject the login and show this message: "Your account has been paused. If you think this is an error, reach out to anthony@iqmeeteq.com."
+
+ADMIN DASHBOARD:
+
+Build an admin dashboard at /admin with its own login. Authentication: hardcoded credentials — email: anthony@iqmeeteq.com, password: 95682. This is a separate login from the main app.
+
+Styling: Navy header (#1A2744) with "AI for HHS" wordmark in gold (#C8963E) on the left and "Admin Dashboard" label in gray on the right. White cards on light gray (#F5F5F5) background. DM Serif Display for the wordmark, DM Sans for everything else. All tables should have horizontal scroll when the browser window is too narrow to show all columns.
+Layout from top to bottom:
+SUMMARY CARDS — Row 1 (4 cards):
+
+Total Users: count of all registered users
+New This Month: count of users registered in the current calendar month
+Weekly Active: count of unique users who started a conversation in the last 7 days
+Unmatched Domains This Week: count of users who registered in the last 7 days with an email domain that did not match our recognized patterns (.gov, .ca.gov, .ca.us, .org, .edu). Style this card with a red alert look — light red background (#FEF2F2), red border (1.5px solid #DC2626), red number, dark red label.
+
+SUMMARY CARDS — Row 2 (4 cards):
+
+Returning vs. One-Time: show as "34 / 13" with "returning / one-time" label below. Returning = users with more than one conversation. One-time = users with exactly one conversation.
+Total Conversations: count of all conversations across all users
+Avg Messages / Conversation: total messages divided by total conversations, rounded to one decimal
+Thumbs Up / Down: show as percentage like "89% up" with raw counts "142 up / 18 down" below
+
+COST CARD (full width):
+
+Est. Cost This Month: dollar estimate of API spend this month based on token usage, with approximate token count shown next to it in smaller gray text
+
+MODEL CONTROLS (single row, white card):
+
+Active Model: dropdown to switch between "Claude Opus 4.6" and "Claude Sonnet 4.6" — changing this updates which model the chatbot uses for all new conversations
+Auto-Downgrade Threshold: editable dollar amount input with "/ month" label — when monthly estimated API spend exceeds this number, the app automatically switches to Sonnet for the rest of the month. Resets to the selected model on the 1st of each month.
+
+BREAKDOWNS (two columns side by side):
+
+Left: Users by County — county name and user count, sorted by count descending
+Right: Users by Service Category — category name and user count, sorted by count descending
+
+TASK LAUNCHER RANKING:
+
+All 8 task launcher cards listed, ranked by number of times tapped. Show rank number, card name, tap count, and a proportional horizontal bar (gold fill #C8963E) showing relative usage compared to the most-tapped card.
+
+UNMATCHED DOMAIN REGISTRATIONS TABLE:
+
+Red border (1.5px solid #DC2626) to make it stand out
+Header line with red dot and text: "Total: [count] — users registered without a recognized domain"
+Columns: Email, Domain, County, Service Category, Registered (date), Connection Explanation (what they typed in the "tell us about your connection" field)
+Horizontal scroll when window is narrow
+
+ALL USERS TABLE:
+
+Filter bar at top with: search-by-email text field, county dropdown filter, service category dropdown filter
+Header line showing "Total Users: [count]" — updates to "Showing [filtered count] of [total]" when filters are active
+Columns: Email (sortable), Domain (sortable — the part after the @ sign), County (sortable), Service Category (sortable), Registered date (sortable), Last Active date (sortable), Conversations count (sortable), Match (sortable — "Yes" in green or "No" in red, based on whether their email domain matched our recognized patterns), Status (sortable — a toggle switch, green = Active, red = Disabled)
+When an admin toggles a user's status to Disabled, set the disabled field to true in the database. That user will see the paused account message on their next login attempt.
+Disabled user rows should have a light red background (#FEF2F2) so they stand out visually
+Horizontal scroll when window is narrow
+
+FEEDBACK TABLE:
+
+Header line showing "Total Entries: [count]"
+Columns: Date, User Email, Type (styled as a small amber badge), What They Were Trying To Do (their text input), File Size
+This table shows friction reports — currently only "file_too_large" type entries from the file upload limit flow
+Horizontal scroll when window is narrow

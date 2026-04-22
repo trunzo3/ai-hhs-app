@@ -1,8 +1,8 @@
-# AIforHHS Workspace
+# AI for HHS Workspace
 
 ## Project Overview
 
-AIforHHS is an AI coaching web app for California county Health and Human Services (HHS) managers. It provides a streaming chat interface powered by Claude (Anthropic), with IQmeetEQ methodology embedded in the system prompt.
+AI for HHS is an AI coaching web app for California county Health and Human Services (HHS) managers. It provides a streaming chat interface powered by Claude (Anthropic), with IQmeetEQ methodology embedded in the system prompt.
 
 ## Product Features
 
@@ -64,10 +64,11 @@ scripts/           # Ingest corpus script
 - `GET /api/admin/feedback` — feedback entries (requires x-admin-auth header)
 - `GET /api/admin/config` — app config (requires x-admin-auth header)
 - `PATCH /api/admin/config` — update config (requires x-admin-auth header)
+- `PATCH /api/admin/users/:id` — toggle user disabled status (requires x-admin-auth header)
 
 ### Database Schema (PostgreSQL + pgvector)
 
-- `users` — id, email, passwordHash, county, serviceCategory, domainMatch, domainNote, resetToken/Expires, lastActive
+- `users` — id, email, passwordHash, county, serviceCategory, domainMatch, domainNote, disabled (boolean, default false), resetToken/Expires, lastActive
 - `conversation_metadata` — id, userId, startedAt, messageCount, taskLauncherUsed, corpusDocsRetrieved
 - `response_ratings` — id, conversationId, userId, rating (up/down), messageIndex
 - `feedback` — id, userId, feedbackType, detail, attemptedFileSize

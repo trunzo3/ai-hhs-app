@@ -1,39 +1,65 @@
-import { useState, useEffect } from "react";
-import { useLocation } from "wouter";
-import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
-import * as z from "zod";
+import { useState, useEffect, useCallback } from "react";
 import { setAdminAuthenticated } from "@/lib/adminAuth";
-import { 
-  useGetAdminStats, 
-  useGetAdminUsers, 
-  useGetAdminFeedback, 
-  useGetAdminConfig,
-  useUpdateAdminConfig,
-  getGetAdminConfigQueryKey
-} from "@workspace/api-client-react";
-import { useQueryClient } from "@tanstack/react-query";
-import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { useToast } from "@/hooks/use-toast";
-import { Loader2, LogOut, TrendingUp, Users, MessageSquare, AlertCircle, ThumbsUp, ThumbsDown } from "lucide-react";
 
-const loginSchema = z.object({
-  email: z.string().email(),
-  password: z.string().min(1),
-});
+type AdminStats = {
+  totalUsers: number;
+  newThisMonth: number;
+  weeklyActive: number;
+  unmatchedDomainsThisWeek: number;
+  returningUsers: number;
+  oneTimeUsers: number;
+  totalConversations: number;
+  avgMessagesPerConversation: number;
+  thumbsUpCount: number;
+  thumbsDownCount: number;
+  currentMonthSpend: number;
+  currentMonthTokens: number;
+  unmatchedDomainCount: number;
+  usersByCounty: Array<{ label: string; count: number }>;
+  usersByServiceCategory: Array<{ label: string; count: number }>;
+  taskLauncherUsage: Array<{ label: string; count: number }>;
+  activeModel: string;
+  spendThreshold: number;
+};
+
+type AdminUser = {
+  id: string;
+  email: string;
+  county: string;
+  serviceCategory: string;
+  domainMatch: boolean;
+  domainNote: string | null;
+  disabled: boolean;
+  createdAt: string;
+  lastActive: string | null;
+  conversationCount: number;
+};
+
+type AdminFeedback = {
+  id: string;
+  userId: string;
+  userEmail: string;
+  feedbackType: string;
+  detail: string | null;
+  attemptedFileSize: number | null;
+  createdAt: string;
+};
+
+const MODEL_OPTIONS = [
+  { value: "claude-opus-4-5", label: "Claude Opus 4.5" },
+  { value: "claude-sonnet-4-6", label: "Claude Sonnet 4.6" },
+];
+
+const fmt = (d: string) => new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+const fmtShort = (d: string | null) => d ? new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "—";
+const getDomain = (email: string) => email.split("@")[1] ?? "";
 
 export default function Admin() {
-  const [location, setLocation] = useLocation();
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
-  const { toast } = useToast();
-  const queryClient = useQueryClient();
+  const [loginEmail, setLoginEmail] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
+  const [loginError, setLoginError] = useState("");
 
   useEffect(() => {
     const auth = sessionStorage.getItem("adminAuth");
@@ -44,18 +70,14 @@ export default function Admin() {
     setIsCheckingAuth(false);
   }, []);
 
-  const loginForm = useForm<z.infer<typeof loginSchema>>({
-    resolver: zodResolver(loginSchema),
-    defaultValues: { email: "", password: "" },
-  });
-
-  const onLogin = (values: z.infer<typeof loginSchema>) => {
-    if (values.email === "anthony@iqmeeteq.com" && values.password === "95682") {
+  const handleLogin = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (loginEmail === "anthony@iqmeeteq.com" && loginPassword === "95682") {
       sessionStorage.setItem("adminAuth", "true");
       setAdminAuthenticated(true);
       setIsAuthenticated(true);
     } else {
-      toast({ variant: "destructive", title: "Access Denied", description: "Invalid admin credentials." });
+      setLoginError("Invalid admin credentials.");
     }
   };
 
@@ -66,49 +88,37 @@ export default function Admin() {
   };
 
   if (isCheckingAuth) {
-    return <div className="min-h-screen bg-sidebar flex items-center justify-center"><Loader2 className="w-8 h-8 text-primary animate-spin" /></div>;
+    return (
+      <div style={{ minHeight: "100vh", background: "#1A2744", display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <div style={{ width: 32, height: 32, border: "3px solid #C8963E", borderTopColor: "transparent", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
+      </div>
+    );
   }
 
   if (!isAuthenticated) {
     return (
-      <div className="min-h-screen bg-sidebar flex flex-col items-center justify-center p-4">
-        <div className="w-full max-w-md bg-card p-8 rounded-lg shadow-xl border border-border">
-          <div className="text-center mb-8">
-            <h1 className="font-serif text-3xl font-bold text-card-foreground">Admin Portal</h1>
-            <p className="text-muted-foreground mt-2">Sign in to access the AIforHHS dashboard</p>
+      <div style={{ minHeight: "100vh", background: "#1A2744", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 24, fontFamily: "'DM Sans', sans-serif" }}>
+        <div style={{ width: "100%", maxWidth: 400, background: "#fff", borderRadius: 12, padding: "40px 36px", boxShadow: "0 8px 32px rgba(0,0,0,0.18)" }}>
+          <div style={{ textAlign: "center", marginBottom: 32 }}>
+            <h1 style={{ fontFamily: "'DM Serif Display', serif", fontSize: 28, color: "#C8963E", margin: "0 0 6px" }}>AI for HHS</h1>
+            <p style={{ fontSize: 14, color: "#6B7280", margin: 0 }}>Admin Dashboard</p>
           </div>
-          <Form {...loginForm}>
-            <form onSubmit={loginForm.handleSubmit(onLogin)} className="space-y-4">
-              <FormField
-                control={loginForm.control}
-                name="email"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Email</FormLabel>
-                    <FormControl>
-                      <Input placeholder="admin@example.com" {...field} data-testid="input-admin-email" />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={loginForm.control}
-                name="password"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Password</FormLabel>
-                    <FormControl>
-                      <Input type="password" placeholder="••••••••" {...field} data-testid="input-admin-password" />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <Button type="submit" className="w-full" data-testid="btn-admin-login">Log In</Button>
-            </form>
-          </Form>
+          <form onSubmit={handleLogin} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            <div>
+              <label style={{ display: "block", fontSize: 13, fontWeight: 500, color: "#374151", marginBottom: 5 }}>Email</label>
+              <input type="email" value={loginEmail} onChange={(e) => setLoginEmail(e.target.value)} placeholder="admin@example.com" style={{ width: "100%", border: "1px solid #D1D5DB", borderRadius: 6, padding: "9px 12px", fontSize: 14, color: "#111827", outline: "none", boxSizing: "border-box" }} data-testid="input-admin-email" />
+            </div>
+            <div>
+              <label style={{ display: "block", fontSize: 13, fontWeight: 500, color: "#374151", marginBottom: 5 }}>Password</label>
+              <input type="password" value={loginPassword} onChange={(e) => setLoginPassword(e.target.value)} placeholder="••••••••" style={{ width: "100%", border: "1px solid #D1D5DB", borderRadius: 6, padding: "9px 12px", fontSize: 14, color: "#111827", outline: "none", boxSizing: "border-box" }} data-testid="input-admin-password" />
+            </div>
+            {loginError && <p style={{ color: "#DC2626", fontSize: 13, margin: 0 }}>{loginError}</p>}
+            <button type="submit" style={{ background: "#1A2744", color: "#fff", border: "none", borderRadius: 6, padding: "10px 0", fontSize: 14, fontWeight: 600, cursor: "pointer", fontFamily: "'DM Sans', sans-serif" }} data-testid="btn-admin-login">
+              Log In
+            </button>
+          </form>
         </div>
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       </div>
     );
   }
@@ -117,295 +127,473 @@ export default function Admin() {
 }
 
 function AdminDashboard({ onLogout }: { onLogout: () => void }) {
-  const { data: stats, isLoading: statsLoading } = useGetAdminStats({ query: { retry: false } });
-  const { data: users, isLoading: usersLoading } = useGetAdminUsers({ query: { retry: false } });
-  const { data: feedback, isLoading: feedbackLoading } = useGetAdminFeedback({ query: { retry: false } });
-  const { data: config, isLoading: configLoading } = useGetAdminConfig({ query: { retry: false } });
-  
-  const updateConfig = useUpdateAdminConfig();
-  const queryClient = useQueryClient();
-  const { toast } = useToast();
+  const [stats, setStats] = useState<AdminStats | null>(null);
+  const [users, setUsers] = useState<AdminUser[]>([]);
+  const [feedback, setFeedback] = useState<AdminFeedback[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const handleConfigUpdate = (key: string, value: any) => {
-    updateConfig.mutate({ data: { [key]: value } }, {
-      onSuccess: () => {
-        queryClient.invalidateQueries({ queryKey: getGetAdminConfigQueryKey() });
-        toast({ title: "Settings updated", description: "The configuration has been saved." });
-      },
-      onError: () => {
-        toast({ variant: "destructive", title: "Error", description: "Failed to update configuration." });
-      }
-    });
+  const [searchEmail, setSearchEmail] = useState("");
+  const [filterCounty, setFilterCounty] = useState("");
+  const [filterCategory, setFilterCategory] = useState("");
+  const [sortField, setSortField] = useState<string>("");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+
+  const [thresholdInput, setThresholdInput] = useState("");
+  const [savingConfig, setSavingConfig] = useState(false);
+
+  const fetchAll = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [sRes, uRes, fRes] = await Promise.all([
+        fetch("/api/admin/stats"),
+        fetch("/api/admin/users"),
+        fetch("/api/admin/feedback"),
+      ]);
+      if (!sRes.ok || !uRes.ok || !fRes.ok) throw new Error("Fetch failed");
+      const [sData, uData, fData] = await Promise.all([sRes.json(), uRes.json(), fRes.json()]);
+      setStats(sData);
+      setUsers(uData);
+      setFeedback(fData);
+      setThresholdInput(String(sData.spendThreshold));
+    } catch {
+      setError("Failed to load dashboard data. Please refresh.");
+    }
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { fetchAll(); }, [fetchAll]);
+
+  const handleModelChange = async (model: string) => {
+    if (!stats) return;
+    setStats((prev) => prev ? { ...prev, activeModel: model } : prev);
+    await fetch("/api/admin/config", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ activeModel: model }) });
   };
 
-  const isLoading = statsLoading || usersLoading || feedbackLoading || configLoading;
+  const handleThresholdSave = async () => {
+    const val = parseFloat(thresholdInput);
+    if (isNaN(val)) return;
+    setSavingConfig(true);
+    await fetch("/api/admin/config", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ spendThreshold: val }) });
+    setStats((prev) => prev ? { ...prev, spendThreshold: val } : prev);
+    setSavingConfig(false);
+  };
 
-  if (isLoading || !stats || !users || !feedback || !config) {
-    return <div className="min-h-screen bg-sidebar flex items-center justify-center"><Loader2 className="w-8 h-8 text-primary animate-spin" /></div>;
+  const handleToggleDisabled = async (userId: string, disabled: boolean) => {
+    setUsers((prev) => prev.map((u) => u.id === userId ? { ...u, disabled } : u));
+    await fetch(`/api/admin/users/${userId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ disabled }) });
+  };
+
+  const handleSort = (field: string) => {
+    if (sortField === field) setSortDir((d) => d === "asc" ? "desc" : "asc");
+    else { setSortField(field); setSortDir("asc"); }
+  };
+
+  const counties = [...new Set(users.map((u) => u.county))].sort();
+  const categories = [...new Set(users.map((u) => u.serviceCategory))].sort();
+
+  const filteredUsers = users.filter((u) => {
+    if (searchEmail && !u.email.toLowerCase().includes(searchEmail.toLowerCase())) return false;
+    if (filterCounty && u.county !== filterCounty) return false;
+    if (filterCategory && u.serviceCategory !== filterCategory) return false;
+    return true;
+  });
+
+  const sortedUsers = sortField ? [...filteredUsers].sort((a: any, b: any) => {
+    let av = a[sortField], bv = b[sortField];
+    if (sortField === "domain") { av = getDomain(a.email); bv = getDomain(b.email); }
+    if (sortField === "match") { av = a.domainMatch ? 1 : 0; bv = b.domainMatch ? 1 : 0; }
+    if (sortField === "status") { av = a.disabled ? 1 : 0; bv = b.disabled ? 1 : 0; }
+    if (av === null || av === undefined) av = "";
+    if (bv === null || bv === undefined) bv = "";
+    if (av < bv) return sortDir === "asc" ? -1 : 1;
+    if (av > bv) return sortDir === "asc" ? 1 : -1;
+    return 0;
+  }) : filteredUsers;
+
+  const unmatchedUsers = users.filter((u) => !u.domainMatch);
+
+  const SortArrow = ({ field }: { field: string }) => (
+    <span style={{ marginLeft: 4, color: sortField === field ? "#C8963E" : "#9CA3AF", fontSize: 11 }}>
+      {sortField === field ? (sortDir === "asc" ? "▲" : "▼") : "⇅"}
+    </span>
+  );
+
+  const TH = ({ label, field, style }: { label: string; field?: string; style?: React.CSSProperties }) => (
+    <th
+      onClick={field ? () => handleSort(field) : undefined}
+      style={{ padding: "10px 14px", textAlign: "left", fontSize: 12, fontWeight: 600, color: "#6B7280", borderBottom: "1px solid #E5E7EB", whiteSpace: "nowrap", cursor: field ? "pointer" : "default", userSelect: "none", background: "#FAFAFA", ...style }}
+    >
+      {label}{field && <SortArrow field={field} />}
+    </th>
+  );
+
+  const TD = ({ children, style }: { children: React.ReactNode; style?: React.CSSProperties }) => (
+    <td style={{ padding: "10px 14px", fontSize: 13, color: "#374151", borderBottom: "1px solid #F3F4F6", verticalAlign: "middle", ...style }}>
+      {children}
+    </td>
+  );
+
+  if (loading) {
+    return (
+      <div style={{ minHeight: "100vh", background: "#F5F5F5", display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <div style={{ width: 36, height: 36, border: "3px solid #C8963E", borderTopColor: "transparent", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      </div>
+    );
   }
 
+  if (error || !stats) {
+    return (
+      <div style={{ minHeight: "100vh", background: "#F5F5F5", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'DM Sans', sans-serif" }}>
+        <div style={{ textAlign: "center", color: "#DC2626" }}>
+          <p style={{ fontSize: 16, marginBottom: 12 }}>{error ?? "Unknown error"}</p>
+          <button onClick={fetchAll} style={{ background: "#1A2744", color: "#fff", border: "none", borderRadius: 6, padding: "8px 20px", cursor: "pointer", fontSize: 14 }}>Retry</button>
+        </div>
+      </div>
+    );
+  }
+
+  const totalRatings = stats.thumbsUpCount + stats.thumbsDownCount;
+  const upPct = totalRatings > 0 ? Math.round((stats.thumbsUpCount / totalRatings) * 100) : 0;
+  const maxTask = Math.max(...stats.taskLauncherUsage.map((t) => t.count), 1);
+  const activeModelLabel = MODEL_OPTIONS.find((m) => m.value === stats.activeModel)?.label ?? stats.activeModel;
+
+  const S = {
+    page: { minHeight: "100vh", background: "#F5F5F5", fontFamily: "'DM Sans', sans-serif" } as React.CSSProperties,
+    header: { background: "#1A2744", padding: "0 32px", height: 58, display: "flex", alignItems: "center", justifyContent: "space-between" } as React.CSSProperties,
+    main: { maxWidth: 1280, margin: "0 auto", padding: "28px 24px", display: "flex", flexDirection: "column" as const, gap: 28 },
+    card: { background: "#fff", borderRadius: 10, boxShadow: "0 1px 4px rgba(0,0,0,0.07)", padding: "20px 24px" } as React.CSSProperties,
+    cardTitle: { fontSize: 12, fontWeight: 600, color: "#6B7280", textTransform: "uppercase" as const, letterSpacing: "0.06em", marginBottom: 6 },
+    bigNum: { fontSize: 30, fontWeight: 700, color: "#111827", lineHeight: 1 },
+    sectionLabel: { fontSize: 16, fontWeight: 600, color: "#1A2744", marginBottom: 14 },
+    grid4: { display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16 } as React.CSSProperties,
+    grid2: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 } as React.CSSProperties,
+    table: { width: "100%", borderCollapse: "collapse" as const, fontSize: 13 },
+    scrollWrap: { overflowX: "auto" as const },
+  };
+
   return (
-    <div className="min-h-screen bg-[#F5F5F5] text-sidebar">
-      <header className="bg-sidebar text-white px-6 py-4 flex items-center justify-between shadow-sm">
-        <h1 className="font-serif text-2xl font-bold tracking-tight">AIforHHS <span className="text-primary font-sans text-sm ml-2 font-normal uppercase tracking-wider">Admin</span></h1>
-        <Button variant="ghost" className="text-sidebar-foreground hover:bg-sidebar-accent" onClick={onLogout} data-testid="btn-admin-logout">
-          <LogOut className="w-4 h-4 mr-2" /> Sign Out
-        </Button>
+    <div style={S.page}>
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } } @media (max-width:900px){.grid4{grid-template-columns:1fr 1fr!important}.grid2cols{grid-template-columns:1fr!important}}`}</style>
+
+      {/* HEADER */}
+      <header style={S.header}>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 14 }}>
+          <span style={{ fontFamily: "'DM Serif Display', serif", fontSize: 22, color: "#C8963E", fontWeight: 700 }}>AI for HHS</span>
+          <span style={{ fontSize: 13, color: "#9CA3AF", fontWeight: 400 }}>Admin Dashboard</span>
+        </div>
+        <button onClick={onLogout} style={{ background: "none", border: "1px solid rgba(255,255,255,0.2)", color: "#D1D5DB", borderRadius: 6, padding: "6px 16px", fontSize: 13, cursor: "pointer", fontFamily: "'DM Sans', sans-serif" }} data-testid="btn-admin-logout">
+          Sign Out
+        </button>
       </header>
 
-      <main className="max-w-7xl mx-auto p-6 space-y-8">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Total Users</CardTitle>
-              <Users className="w-4 h-4 text-primary" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{stats.totalUsers}</div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Conversations</CardTitle>
-              <MessageSquare className="w-4 h-4 text-primary" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{stats.totalConversations}</div>
-              <p className="text-xs text-muted-foreground mt-1">{stats.avgMessagesPerConversation.toFixed(1)} avg. messages per chat</p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">API Spend (MTD)</CardTitle>
-              <TrendingUp className="w-4 h-4 text-primary" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">${stats.currentMonthSpend.toFixed(2)}</div>
-              <p className="text-xs text-muted-foreground mt-1">Threshold: ${stats.spendThreshold}</p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Unmatched Domains</CardTitle>
-              <AlertCircle className="w-4 h-4 text-destructive" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-destructive">{stats.unmatchedDomainCount}</div>
-              <p className="text-xs text-muted-foreground mt-1">Requires review</p>
-            </CardContent>
-          </Card>
+      <main style={S.main}>
+
+        {/* SUMMARY ROW 1 */}
+        <div style={S.grid4} className="grid4">
+          <StatCard title="Total Users" value={stats.totalUsers} />
+          <StatCard title="New This Month" value={stats.newThisMonth} />
+          <StatCard title="Weekly Active" value={stats.weeklyActive} sub="unique users, last 7 days" />
+          <div style={{ background: "#FEF2F2", border: "1.5px solid #DC2626", borderRadius: 10, padding: "20px 24px" }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: "#991B1B", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>Unmatched Domains This Week</div>
+            <div style={{ fontSize: 30, fontWeight: 700, color: "#DC2626", lineHeight: 1 }}>{stats.unmatchedDomainsThisWeek}</div>
+            <div style={{ fontSize: 12, color: "#DC2626", marginTop: 5, opacity: 0.7 }}>new registrations, no domain match</div>
+          </div>
         </div>
 
-        <Tabs defaultValue="overview" className="w-full">
-          <TabsList className="bg-white border border-border w-full justify-start h-auto p-1">
-            <TabsTrigger value="overview" className="data-[state=active]:bg-primary data-[state=active]:text-white">Overview</TabsTrigger>
-            <TabsTrigger value="users" className="data-[state=active]:bg-primary data-[state=active]:text-white">Users</TabsTrigger>
-            <TabsTrigger value="feedback" className="data-[state=active]:bg-primary data-[state=active]:text-white">Feedback</TabsTrigger>
-            <TabsTrigger value="settings" className="data-[state=active]:bg-primary data-[state=active]:text-white">Settings</TabsTrigger>
-          </TabsList>
-          
-          <TabsContent value="overview" className="space-y-4 mt-6">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <Card>
-                <CardHeader>
-                  <CardTitle>Top Counties</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>County</TableHead>
-                        <TableHead className="text-right">Users</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {stats.usersByCounty.map((c, i) => (
-                        <TableRow key={i}>
-                          <TableCell>{c.label}</TableCell>
-                          <TableCell className="text-right font-medium">{c.count}</TableCell>
-                        </TableRow>
-                      ))}
-                      {stats.usersByCounty.length === 0 && (
-                        <TableRow><TableCell colSpan={2} className="text-center text-muted-foreground">No data available</TableCell></TableRow>
-                      )}
-                    </TableBody>
-                  </Table>
-                </CardContent>
-              </Card>
+        {/* SUMMARY ROW 2 */}
+        <div style={S.grid4} className="grid4">
+          <div style={S.card}>
+            <div style={S.cardTitle}>Returning vs. One-Time</div>
+            <div style={{ ...S.bigNum, color: "#111827" }}>{stats.returningUsers} <span style={{ fontSize: 16, color: "#6B7280", fontWeight: 400 }}>/ {stats.oneTimeUsers}</span></div>
+            <div style={{ fontSize: 12, color: "#9CA3AF", marginTop: 5 }}>returning / one-time</div>
+          </div>
+          <StatCard title="Total Conversations" value={stats.totalConversations} />
+          <StatCard title="Avg Messages / Conversation" value={stats.avgMessagesPerConversation.toFixed(1)} />
+          <div style={S.card}>
+            <div style={S.cardTitle}>Thumbs Up / Down</div>
+            <div style={{ ...S.bigNum }}>{upPct}% <span style={{ fontSize: 15, fontWeight: 400, color: "#6B7280" }}>up</span></div>
+            <div style={{ fontSize: 12, color: "#9CA3AF", marginTop: 5 }}>{stats.thumbsUpCount} up / {stats.thumbsDownCount} down</div>
+          </div>
+        </div>
 
-              <Card>
-                <CardHeader>
-                  <CardTitle>Task Launcher Usage</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Task</TableHead>
-                        <TableHead className="text-right">Count</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {stats.taskLauncherUsage.map((t, i) => (
-                        <TableRow key={i}>
-                          <TableCell className="max-w-[200px] truncate" title={t.label}>{t.label}</TableCell>
-                          <TableCell className="text-right font-medium">{t.count}</TableCell>
-                        </TableRow>
-                      ))}
-                      {stats.taskLauncherUsage.length === 0 && (
-                        <TableRow><TableCell colSpan={2} className="text-center text-muted-foreground">No data available</TableCell></TableRow>
-                      )}
-                    </TableBody>
-                  </Table>
-                  
-                  <div className="mt-8">
-                    <h4 className="text-sm font-medium mb-4">Response Ratings</h4>
-                    <div className="flex items-center gap-6">
-                      <div className="flex items-center gap-2">
-                        <div className="w-10 h-10 rounded-full bg-green-100 text-green-700 flex items-center justify-center">
-                          <ThumbsUp className="w-5 h-5" />
-                        </div>
-                        <div>
-                          <div className="text-xl font-bold">{stats.thumbsUpCount}</div>
-                          <div className="text-xs text-muted-foreground">Helpful</div>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <div className="w-10 h-10 rounded-full bg-red-100 text-red-700 flex items-center justify-center">
-                          <ThumbsDown className="w-5 h-5" />
-                        </div>
-                        <div>
-                          <div className="text-xl font-bold">{stats.thumbsDownCount}</div>
-                          <div className="text-xs text-muted-foreground">Not Helpful</div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
+        {/* COST CARD */}
+        <div style={{ ...S.card, display: "flex", alignItems: "center", gap: 32, flexWrap: "wrap" }}>
+          <div>
+            <div style={S.cardTitle}>Est. Cost This Month</div>
+            <div style={{ fontSize: 34, fontWeight: 700, color: "#111827" }}>${stats.currentMonthSpend.toFixed(2)}</div>
+          </div>
+          <div style={{ color: "#9CA3AF", fontSize: 13 }}>
+            {stats.currentMonthTokens.toLocaleString()} tokens
+          </div>
+        </div>
+
+        {/* MODEL CONTROLS */}
+        <div style={S.card}>
+          <div style={S.sectionLabel}>Model Controls</div>
+          <div style={{ display: "flex", flexWrap: "wrap", alignItems: "flex-end", gap: 32 }}>
+            <div>
+              <label style={{ display: "block", fontSize: 13, fontWeight: 500, color: "#374151", marginBottom: 6 }}>Active Model</label>
+              <select
+                value={stats.activeModel}
+                onChange={(e) => handleModelChange(e.target.value)}
+                style={{ border: "1px solid #D1D5DB", borderRadius: 6, padding: "8px 36px 8px 12px", fontSize: 14, color: "#111827", background: "#fff", cursor: "pointer", appearance: "none", backgroundImage: "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24'%3E%3Cpath fill='%236B7280' d='M7 10l5 5 5-5z'/%3E%3C/svg%3E\")", backgroundRepeat: "no-repeat", backgroundPosition: "right 10px center" }}
+                data-testid="select-model"
+              >
+                {MODEL_OPTIONS.map((m) => (
+                  <option key={m.value} value={m.value}>{m.label}</option>
+                ))}
+              </select>
+              <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 4 }}>Applies to all new conversations</div>
             </div>
-          </TabsContent>
+            <div>
+              <label style={{ display: "block", fontSize: 13, fontWeight: 500, color: "#374151", marginBottom: 6 }}>Auto-Downgrade Threshold</label>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ fontSize: 14, color: "#6B7280" }}>$</span>
+                <input
+                  type="number"
+                  value={thresholdInput}
+                  onChange={(e) => setThresholdInput(e.target.value)}
+                  style={{ width: 90, border: "1px solid #D1D5DB", borderRadius: 6, padding: "8px 10px", fontSize: 14, color: "#111827" }}
+                  data-testid="input-threshold"
+                />
+                <span style={{ fontSize: 13, color: "#6B7280" }}>/ month</span>
+                <button onClick={handleThresholdSave} disabled={savingConfig} style={{ background: "#1A2744", color: "#fff", border: "none", borderRadius: 6, padding: "8px 14px", fontSize: 13, cursor: "pointer", fontFamily: "'DM Sans', sans-serif" }}>
+                  {savingConfig ? "Saving…" : "Save"}
+                </button>
+              </div>
+              <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 4 }}>Downgrades to Sonnet when exceeded</div>
+            </div>
+          </div>
+        </div>
 
-          <TabsContent value="users" className="mt-6">
-            <Card>
-              <CardHeader>
-                <CardTitle>Registered Users</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Email</TableHead>
-                      <TableHead>County</TableHead>
-                      <TableHead>Category</TableHead>
-                      <TableHead>Domain Match</TableHead>
-                      <TableHead>Registered</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {users.map((u) => (
-                      <TableRow key={u.id}>
-                        <TableCell className="font-medium">{u.email}</TableCell>
-                        <TableCell>{u.county}</TableCell>
-                        <TableCell>{u.serviceCategory}</TableCell>
-                        <TableCell>
-                          {u.domainMatch ? (
-                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">Yes</span>
-                          ) : (
-                            <div className="flex flex-col gap-1">
-                              <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-800 w-fit">No</span>
-                              {u.domainNote && <span className="text-xs text-muted-foreground italic truncate max-w-[150px]" title={u.domainNote}>{u.domainNote}</span>}
-                            </div>
-                          )}
-                        </TableCell>
-                        <TableCell>{new Date(u.createdAt).toLocaleDateString()}</TableCell>
-                      </TableRow>
-                    ))}
-                    {users.length === 0 && (
-                      <TableRow><TableCell colSpan={5} className="text-center text-muted-foreground py-8">No users found</TableCell></TableRow>
-                    )}
-                  </TableBody>
-                </Table>
-              </CardContent>
-            </Card>
-          </TabsContent>
+        {/* BREAKDOWNS */}
+        <div style={S.grid2} className="grid2cols">
+          <div style={S.card}>
+            <div style={S.sectionLabel}>Users by County</div>
+            <div style={{ overflowY: "auto", maxHeight: 320 }}>
+              <table style={S.table}>
+                <tbody>
+                  {stats.usersByCounty.map((c, i) => (
+                    <tr key={i} style={{ borderBottom: "1px solid #F3F4F6" }}>
+                      <td style={{ padding: "8px 0", fontSize: 13, color: "#374151" }}>{c.label}</td>
+                      <td style={{ padding: "8px 0", fontSize: 13, fontWeight: 600, color: "#111827", textAlign: "right" }}>{c.count}</td>
+                    </tr>
+                  ))}
+                  {stats.usersByCounty.length === 0 && <tr><td style={{ padding: 12, color: "#9CA3AF", fontSize: 13 }} colSpan={2}>No data yet</td></tr>}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div style={S.card}>
+            <div style={S.sectionLabel}>Users by Service Category</div>
+            <div style={{ overflowY: "auto", maxHeight: 320 }}>
+              <table style={S.table}>
+                <tbody>
+                  {stats.usersByServiceCategory.map((c, i) => (
+                    <tr key={i} style={{ borderBottom: "1px solid #F3F4F6" }}>
+                      <td style={{ padding: "8px 0", fontSize: 13, color: "#374151" }}>{c.label}</td>
+                      <td style={{ padding: "8px 0", fontSize: 13, fontWeight: 600, color: "#111827", textAlign: "right" }}>{c.count}</td>
+                    </tr>
+                  ))}
+                  {stats.usersByServiceCategory.length === 0 && <tr><td style={{ padding: 12, color: "#9CA3AF", fontSize: 13 }} colSpan={2}>No data yet</td></tr>}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
 
-          <TabsContent value="feedback" className="mt-6">
-             <Card>
-              <CardHeader>
-                <CardTitle>User Feedback</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Type</TableHead>
-                      <TableHead>Detail</TableHead>
-                      <TableHead>Date</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {feedback.map((f) => (
-                      <TableRow key={f.id}>
-                        <TableCell className="font-medium capitalize">{f.feedbackType.replace(/_/g, ' ')}</TableCell>
-                        <TableCell>{f.detail || "-"}</TableCell>
-                        <TableCell>{new Date(f.createdAt).toLocaleDateString()}</TableCell>
-                      </TableRow>
-                    ))}
-                    {feedback.length === 0 && (
-                      <TableRow><TableCell colSpan={3} className="text-center text-muted-foreground py-8">No feedback found</TableCell></TableRow>
-                    )}
-                  </TableBody>
-                </Table>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          <TabsContent value="settings" className="mt-6">
-             <Card className="max-w-2xl">
-              <CardHeader>
-                <CardTitle>System Configuration</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-6">
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">Active AI Model</label>
-                  <Select 
-                    value={config.activeModel} 
-                    onValueChange={(val) => handleConfigUpdate("activeModel", val)}
-                  >
-                    <SelectTrigger data-testid="select-model">
-                      <SelectValue placeholder="Select model" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="Sonnet 4.6">Sonnet 4.6 (Default)</SelectItem>
-                      <SelectItem value="Opus 4.6">Opus 4.6 (High capability, higher cost)</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <p className="text-xs text-muted-foreground">Select the model used for new conversations.</p>
-                </div>
-
-                <div className="space-y-2 pt-4">
-                  <label className="text-sm font-medium">Monthly Spend Threshold ($)</label>
-                  <div className="flex items-center gap-3">
-                    <Input 
-                      type="number" 
-                      defaultValue={config.spendThreshold}
-                      onBlur={(e) => {
-                        const val = parseFloat(e.target.value);
-                        if (!isNaN(val) && val !== config.spendThreshold) {
-                          handleConfigUpdate("spendThreshold", val);
-                        }
-                      }}
-                      data-testid="input-threshold"
-                    />
+        {/* TASK LAUNCHER RANKING */}
+        <div style={S.card}>
+          <div style={S.sectionLabel}>Task Launcher Ranking</div>
+          {stats.taskLauncherUsage.length === 0 ? (
+            <p style={{ color: "#9CA3AF", fontSize: 13 }}>No task launcher usage yet.</p>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              {stats.taskLauncherUsage.map((t, i) => (
+                <div key={i} style={{ display: "flex", alignItems: "center", gap: 14 }}>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: "#6B7280", width: 20, textAlign: "right", flexShrink: 0 }}>#{i + 1}</span>
+                  <span style={{ fontSize: 13, color: "#374151", minWidth: 200, flex: 1 }}>{t.label}</span>
+                  <div style={{ flex: 2, height: 10, background: "#F3F4F6", borderRadius: 5, overflow: "hidden" }}>
+                    <div style={{ height: "100%", width: `${Math.round((t.count / maxTask) * 100)}%`, background: "#C8963E", borderRadius: 5, transition: "width 0.3s" }} />
                   </div>
-                  <p className="text-xs text-muted-foreground">System will automatically downgrade to Sonnet when this threshold is reached to control costs.</p>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: "#111827", width: 36, textAlign: "right", flexShrink: 0 }}>{t.count}</span>
                 </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-        </Tabs>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* UNMATCHED DOMAIN REGISTRATIONS TABLE */}
+        <div style={{ background: "#fff", borderRadius: 10, boxShadow: "0 1px 4px rgba(0,0,0,0.07)", border: "1.5px solid #DC2626", overflow: "hidden" }}>
+          <div style={{ padding: "16px 24px 12px", display: "flex", alignItems: "center", gap: 10, borderBottom: "1px solid #FEE2E2" }}>
+            <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#DC2626", flexShrink: 0 }} />
+            <span style={{ fontSize: 14, fontWeight: 600, color: "#374151" }}>
+              Total: {unmatchedUsers.length} — users registered without a recognized domain
+            </span>
+          </div>
+          <div style={S.scrollWrap}>
+            <table style={S.table}>
+              <thead>
+                <tr>
+                  <TH label="Email" />
+                  <TH label="Domain" />
+                  <TH label="County" />
+                  <TH label="Service Category" />
+                  <TH label="Registered" />
+                  <TH label="Connection Explanation" />
+                </tr>
+              </thead>
+              <tbody>
+                {unmatchedUsers.map((u) => (
+                  <tr key={u.id}>
+                    <TD>{u.email}</TD>
+                    <TD><span style={{ fontFamily: "monospace", fontSize: 12 }}>{getDomain(u.email)}</span></TD>
+                    <TD>{u.county}</TD>
+                    <TD>{u.serviceCategory}</TD>
+                    <TD>{fmt(u.createdAt)}</TD>
+                    <TD style={{ color: u.domainNote ? "#374151" : "#9CA3AF", fontStyle: u.domainNote ? "normal" : "italic" }}>{u.domainNote || "—"}</TD>
+                  </tr>
+                ))}
+                {unmatchedUsers.length === 0 && (
+                  <tr><td colSpan={6} style={{ padding: 20, textAlign: "center", color: "#9CA3AF", fontSize: 13 }}>No unmatched domain registrations</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* ALL USERS TABLE */}
+        <div style={S.card}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12, marginBottom: 16 }}>
+            <div style={S.sectionLabel}>
+              {filteredUsers.length < users.length
+                ? `Showing ${filteredUsers.length} of ${users.length} users`
+                : `Total Users: ${users.length}`}
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+              <input
+                type="text"
+                placeholder="Search by email..."
+                value={searchEmail}
+                onChange={(e) => setSearchEmail(e.target.value)}
+                style={{ border: "1px solid #D1D5DB", borderRadius: 6, padding: "7px 12px", fontSize: 13, color: "#111827", width: 200 }}
+              />
+              <select value={filterCounty} onChange={(e) => setFilterCounty(e.target.value)} style={{ border: "1px solid #D1D5DB", borderRadius: 6, padding: "7px 12px", fontSize: 13, color: "#111827", background: "#fff" }}>
+                <option value="">All Counties</option>
+                {counties.map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
+              <select value={filterCategory} onChange={(e) => setFilterCategory(e.target.value)} style={{ border: "1px solid #D1D5DB", borderRadius: 6, padding: "7px 12px", fontSize: 13, color: "#111827", background: "#fff" }}>
+                <option value="">All Categories</option>
+                {categories.map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+          </div>
+          <div style={S.scrollWrap}>
+            <table style={S.table}>
+              <thead>
+                <tr>
+                  <TH label="Email" field="email" />
+                  <TH label="Domain" field="domain" />
+                  <TH label="County" field="county" />
+                  <TH label="Service Category" field="serviceCategory" />
+                  <TH label="Registered" field="createdAt" />
+                  <TH label="Last Active" field="lastActive" />
+                  <TH label="Conversations" field="conversationCount" />
+                  <TH label="Match" field="match" />
+                  <TH label="Status" field="status" />
+                </tr>
+              </thead>
+              <tbody>
+                {sortedUsers.map((u) => (
+                  <tr key={u.id} style={{ background: u.disabled ? "#FEF2F2" : "transparent" }}>
+                    <TD style={{ fontWeight: 500, maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{u.email}</TD>
+                    <TD><span style={{ fontFamily: "monospace", fontSize: 12 }}>{getDomain(u.email)}</span></TD>
+                    <TD>{u.county}</TD>
+                    <TD style={{ maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{u.serviceCategory}</TD>
+                    <TD>{fmt(u.createdAt)}</TD>
+                    <TD>{fmtShort(u.lastActive)}</TD>
+                    <TD style={{ textAlign: "center" }}>{u.conversationCount}</TD>
+                    <TD>
+                      {u.domainMatch
+                        ? <span style={{ background: "#D1FAE5", color: "#065F46", fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 10 }}>Yes</span>
+                        : <span style={{ background: "#FEE2E2", color: "#991B1B", fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 10 }}>No</span>}
+                    </TD>
+                    <TD>
+                      <ToggleSwitch enabled={!u.disabled} onChange={(v) => handleToggleDisabled(u.id, !v)} />
+                    </TD>
+                  </tr>
+                ))}
+                {sortedUsers.length === 0 && (
+                  <tr><td colSpan={9} style={{ padding: 20, textAlign: "center", color: "#9CA3AF", fontSize: 13 }}>No users match your filters</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* FEEDBACK TABLE */}
+        <div style={S.card}>
+          <div style={{ ...S.sectionLabel, marginBottom: 6 }}>Feedback</div>
+          <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 14 }}>Total Entries: {feedback.length}</div>
+          <div style={S.scrollWrap}>
+            <table style={S.table}>
+              <thead>
+                <tr>
+                  <TH label="Date" />
+                  <TH label="User Email" />
+                  <TH label="Type" />
+                  <TH label="What They Were Trying To Do" />
+                  <TH label="File Size" />
+                </tr>
+              </thead>
+              <tbody>
+                {feedback.map((f) => (
+                  <tr key={f.id}>
+                    <TD style={{ whiteSpace: "nowrap" }}>{fmt(f.createdAt)}</TD>
+                    <TD style={{ maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.userEmail}</TD>
+                    <TD>
+                      <span style={{ background: "#FEF3C7", color: "#92400E", fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 10 }}>
+                        {f.feedbackType.replace(/_/g, " ")}
+                      </span>
+                    </TD>
+                    <TD style={{ color: f.detail ? "#374151" : "#9CA3AF", fontStyle: f.detail ? "normal" : "italic" }}>{f.detail || "—"}</TD>
+                    <TD>{f.attemptedFileSize ? `${(f.attemptedFileSize / 1024 / 1024).toFixed(1)} MB` : "—"}</TD>
+                  </tr>
+                ))}
+                {feedback.length === 0 && (
+                  <tr><td colSpan={5} style={{ padding: 20, textAlign: "center", color: "#9CA3AF", fontSize: 13 }}>No feedback entries yet</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
       </main>
     </div>
+  );
+}
+
+function StatCard({ title, value, sub }: { title: string; value: string | number; sub?: string }) {
+  return (
+    <div style={{ background: "#fff", borderRadius: 10, boxShadow: "0 1px 4px rgba(0,0,0,0.07)", padding: "20px 24px" }}>
+      <div style={{ fontSize: 12, fontWeight: 600, color: "#6B7280", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>{title}</div>
+      <div style={{ fontSize: 30, fontWeight: 700, color: "#111827", lineHeight: 1 }}>{value}</div>
+      {sub && <div style={{ fontSize: 12, color: "#9CA3AF", marginTop: 5 }}>{sub}</div>}
+    </div>
+  );
+}
+
+function ToggleSwitch({ enabled, onChange }: { enabled: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <button
+      onClick={() => onChange(!enabled)}
+      style={{ width: 42, height: 24, borderRadius: 12, background: enabled ? "#16A34A" : "#D1D5DB", border: "none", cursor: "pointer", position: "relative", transition: "background 0.2s", flexShrink: 0, padding: 0 }}
+      title={enabled ? "Active — click to disable" : "Disabled — click to enable"}
+    >
+      <span style={{ display: "block", width: 18, height: 18, borderRadius: "50%", background: "#fff", position: "absolute", top: 3, left: enabled ? 21 : 3, transition: "left 0.2s", boxShadow: "0 1px 3px rgba(0,0,0,0.2)" }} />
+    </button>
   );
 }
