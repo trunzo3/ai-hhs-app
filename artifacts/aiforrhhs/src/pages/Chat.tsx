@@ -285,18 +285,21 @@ export default function Chat() {
       <div className="flex-1 overflow-y-auto px-4 py-8" ref={scrollRef}>
         <div className="max-w-3xl mx-auto space-y-6">
           {messages.map((msg, idx) => (
-            <div key={idx} className={`flex flex-col ${msg.role === "user" ? "items-end" : "items-start"}`}>
-              <div className={`max-w-[85%] rounded-2xl px-5 py-4 ${
+            <div key={idx} className={`flex flex-col ${msg.role === "user" ? "items-end" : "items-start w-full"}`}>
+              <div className={`rounded-2xl px-5 py-4 ${
                 msg.role === "user" 
-                  ? "bg-sidebar text-white shadow-md rounded-br-none" 
-                  : "bg-white text-sidebar shadow-sm rounded-bl-none border border-border/50"
+                  ? "max-w-[85%] bg-sidebar text-white shadow-md rounded-br-none" 
+                  : "w-full bg-white shadow-sm rounded-bl-none border border-gray-200"
               }`}>
                 {msg.fileAttached && (
-                  <div className="flex items-center gap-2 mb-2 text-primary text-sm font-medium">
+                  <div className="flex items-center gap-2 mb-2 text-[#C8963E] text-sm font-medium">
                     <Paperclip className="w-4 h-4" /> PDF Attached
                   </div>
                 )}
-                <div className="whitespace-pre-wrap leading-relaxed text-[15px]">{msg.content}</div>
+                <div
+                  className="whitespace-pre-wrap leading-relaxed text-[15px]"
+                  style={{ color: msg.role === "assistant" ? "#1A2744" : "#ffffff" }}
+                >{msg.content}</div>
                 
                 {msg.role === "user" && (
                   <div className="text-[11px] text-white/50 mt-2 text-right">
@@ -343,11 +346,11 @@ export default function Chat() {
                 <Button 
                   key={i}
                   variant="outline" 
-                  className="h-auto p-4 justify-start text-left bg-white hover:bg-primary/5 hover:border-primary border-border/60 shadow-sm transition-all"
+                  className="h-auto p-4 justify-start text-left bg-white hover:bg-[#C8963E]/5 hover:border-[#C8963E] hover:shadow-md border border-gray-200 shadow-sm transition-all"
                   onClick={() => sendMessage(task, true)}
                   data-testid={`btn-task-${i}`}
                 >
-                  <span className="text-[15px] font-medium text-sidebar">{task}</span>
+                  <span className="text-[15px] font-medium text-[#1A2744]">{task}</span>
                 </Button>
               ))}
             </div>
@@ -355,11 +358,11 @@ export default function Chat() {
           {isInitialState && (
              <div className="mt-4 text-center">
                <button 
-                className="text-sm text-sidebar/60 hover:text-primary transition-colors underline decoration-dotted underline-offset-4"
-                onClick={() => sendMessage("I'm working outside my usual area. Can you help?", true)}
+                className="text-sm text-[#C8963E] hover:text-[#C8963E]/80 transition-colors underline decoration-dotted underline-offset-4 font-medium"
+                onClick={() => sendMessage("I'm working outside my usual department. Can you help?", true)}
                 data-testid="btn-outside-area"
                >
-                 Working outside your usual area? Let me know.
+                 Working outside your usual department? Let me know.
                </button>
              </div>
           )}
@@ -417,7 +420,7 @@ export default function Chat() {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               placeholder="Ask anything or describe what you're working on..."
-              className="flex-1 bg-transparent border-0 focus:ring-0 resize-none min-h-[44px] max-h-32 py-2.5 px-2 text-[15px] placeholder:text-sidebar/40 focus-visible:outline-none"
+              className="flex-1 bg-transparent border-0 focus:ring-0 resize-none min-h-[44px] max-h-32 py-2.5 px-2 text-[15px] text-gray-800 placeholder:text-gray-400 focus-visible:outline-none"
               rows={1}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
