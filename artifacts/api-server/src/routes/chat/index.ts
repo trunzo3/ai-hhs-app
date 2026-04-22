@@ -77,8 +77,16 @@ router.post("/chat/message", requireAuth, async (req, res): Promise<void> => {
     taskLauncher: taskLauncher ?? null,
   });
 
+  if (taskLauncher) {
+    await db.update(conversationMetadataTable)
+      .set({ taskLauncherUsed: taskLauncher })
+      .where(eq(conversationMetadataTable.id, conversationId));
+  }
+
+  const userText = message.trim() || (fileBase64 ? "Document attached" : "");
+
   const history = truncateHistory(getHistory(conversationId));
-  addMessage(conversationId, { role: "user", content: message, timestamp: new Date() });
+  addMessage(conversationId, { role: "user", content: userText, timestamp: new Date() });
 
   const messageContent: Anthropic.ContentBlockParam[] = [];
   let hasPDF = false;
@@ -112,7 +120,7 @@ router.post("/chat/message", requireAuth, async (req, res): Promise<void> => {
     }
   }
 
-  messageContent.push({ type: "text", text: message });
+  messageContent.push({ type: "text", text: userText || "Document attached" });
 
   const messages: Anthropic.MessageParam[] = [
     ...history.map((m) => ({

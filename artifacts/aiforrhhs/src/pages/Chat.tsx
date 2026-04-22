@@ -324,11 +324,6 @@ export default function Chat() {
           <button onClick={logout} style={{ background: "none", border: "none", color: "#7B8CA3", fontSize: 13, cursor: "pointer", fontFamily: "'DM Sans', sans-serif", padding: "5px 0" }} data-testid="btn-logout">Log out</button>
         </div>
       </header>
-      {/* ── TRUST REMINDER ── */}
-      <div style={{ flexShrink: 0, background: "#F0F2F5", borderBottom: "1px solid #E2E5EA", padding: "5px 24px", textAlign: "center" }}>
-        <span style={{ fontSize: 12, color: "#6B7280", letterSpacing: "0.01em" }}>AI for HHS never stores your conversations. When you close this chat, it's gone.</span>
-      </div>
-
       {/* ── CHAT AREA ── */}
       <div style={{ flex: 1, overflowY: "auto", background: "#ECECEC", padding: "32px 16px" }} ref={scrollRef}>
         <div style={{ maxWidth: 720, margin: "0 auto" }}>
@@ -409,6 +404,9 @@ export default function Chat() {
       {/* ── INPUT BAR ── */}
       <div style={{ flexShrink: 0, background: "#FFFFFF", borderTop: "1.5px solid #CCCCCC", padding: "12px 16px 14px" }}>
         <div style={{ maxWidth: 720, margin: "0 auto" }}>
+          <div style={{ textAlign: "center", marginBottom: 8 }}>
+            <span style={{ fontSize: 12, color: "#1A2744", letterSpacing: "0.01em" }}>AI for HHS never stores your conversations. When you close this chat, it's gone.</span>
+          </div>
           {fileError && (
             <div style={{ marginBottom: 10, padding: "10px 14px", background: "#FEE2E2", color: "#DC2626", borderRadius: 8, fontSize: 13, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
               <span>{fileError}</span>
@@ -449,7 +447,7 @@ export default function Chat() {
             )}
           </div>
           <div style={{ textAlign: "center", marginTop: 6 }}>
-            <span style={{ fontSize: 10, color: "#9CA3AF" }}>AI for HHS can make mistakes. Verify important information. {isStreaming ? "Generating — Enter is paused · Shift+Enter for new line." : "Enter to send · Shift+Enter for new line."}</span>
+            <span style={{ fontSize: 10, color: "#6B7280" }}>{isStreaming ? "Generating — Enter is paused · Shift+Enter for new line." : "Enter to send · Shift+Enter for new line."}</span>
           </div>
         </div>
       </div>

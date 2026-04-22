@@ -470,7 +470,7 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
                   {stats.usersByCounty.length === 0 ? <p style={{ color: "#9CA3AF", fontSize: 13, margin: 0 }}>No data yet</p> : stats.usersByCounty.map((c, i) => (
                     <div key={i} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid #F3F4F6", fontSize: 13 }}>
                       <span style={{ color: "#374151" }}>{c.label}</span>
-                      <span style={{ fontWeight: 700, color: "#1A2744", marginLeft: 12 }}>— {c.count}</span>
+                      <span style={{ fontWeight: 700, color: "#1A2744", marginLeft: 12 }}>{c.count}</span>
                     </div>
                   ))}
                 </div>
@@ -481,7 +481,7 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
                   {stats.usersByServiceCategory.length === 0 ? <p style={{ color: "#9CA3AF", fontSize: 13, margin: 0 }}>No data yet</p> : stats.usersByServiceCategory.map((c, i) => (
                     <div key={i} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid #F3F4F6", fontSize: 13 }}>
                       <span style={{ color: "#374151" }}>{c.label}</span>
-                      <span style={{ fontWeight: 700, color: "#1A2744", marginLeft: 12 }}>— {c.count}</span>
+                      <span style={{ fontWeight: 700, color: "#1A2744", marginLeft: 12 }}>{c.count}</span>
                     </div>
                   ))}
                 </div>
