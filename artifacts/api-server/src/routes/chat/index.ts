@@ -2,7 +2,7 @@ import { Router, type IRouter } from "express";
 import Anthropic from "@anthropic-ai/sdk";
 import { db, conversationMetadataTable, responseRatingsTable, usersTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
-import { buildSystemPrompt } from "../../lib/systemPrompt";
+import { buildSystemPromptFromDB } from "../../lib/systemPrompt";
 import { retrieveRelevantChunks } from "../../lib/rag";
 import {
   getHistory,
@@ -63,7 +63,7 @@ router.post("/chat/message", requireAuth, async (req, res): Promise<void> => {
   }
 
   const ragContext = await retrieveRelevantChunks(message);
-  const systemPrompt = buildSystemPrompt({
+  const systemPrompt = await buildSystemPromptFromDB({
     ragContext,
     county: user.county,
     serviceCategory: user.serviceCategory,

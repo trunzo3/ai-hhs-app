@@ -4,73 +4,72 @@ import { setAdminAuthenticated } from "@/lib/adminAuth";
 type AdminTab = "dashboard" | "users" | "feedback" | "settings";
 
 type AdminStats = {
-  totalUsers: number;
-  newThisMonth: number;
-  weeklyActive: number;
-  unmatchedDomainsThisWeek: number;
-  returningUsers: number;
-  oneTimeUsers: number;
-  totalConversations: number;
-  avgMessagesPerConversation: number;
-  thumbsUpCount: number;
-  thumbsDownCount: number;
-  currentMonthSpend: number;
-  currentMonthTokens: number;
-  unmatchedDomainCount: number;
-  usersByCounty: Array<{ label: string; count: number }>;
-  usersByServiceCategory: Array<{ label: string; count: number }>;
-  taskLauncherUsage: Array<{ label: string; count: number }>;
-  activeModel: string;
-  spendThreshold: number;
+  totalUsers: number; newThisMonth: number; weeklyActive: number; unmatchedDomainsThisWeek: number;
+  returningUsers: number; oneTimeUsers: number; totalConversations: number; avgMessagesPerConversation: number;
+  thumbsUpCount: number; thumbsDownCount: number; currentMonthSpend: number; currentMonthTokens: number;
+  unmatchedDomainCount: number; usersByCounty: Array<{ label: string; count: number }>;
+  usersByServiceCategory: Array<{ label: string; count: number }>; taskLauncherUsage: Array<{ label: string; count: number }>;
+  activeModel: string; spendThreshold: number;
 };
-
 type AdminUser = {
-  id: string;
-  email: string;
-  county: string;
-  serviceCategory: string;
-  domainMatch: boolean;
-  domainNote: string | null;
-  disabled: boolean;
-  createdAt: string;
-  lastActive: string | null;
-  conversationCount: number;
+  id: string; email: string; county: string; serviceCategory: string; domainMatch: boolean;
+  domainNote: string | null; disabled: boolean; createdAt: string; lastActive: string | null; conversationCount: number;
 };
-
 type AdminFeedback = {
-  id: string;
-  userId: string;
-  userEmail: string;
-  feedbackType: string;
-  detail: string | null;
-  attemptedFileSize: number | null;
-  createdAt: string;
+  id: string; userId: string; userEmail: string; feedbackType: string;
+  detail: string | null; attemptedFileSize: number | null; createdAt: string;
 };
-
-type CorpusDoc = {
-  docId: string;
-  chunkCount: number;
-  lastUpdated: string;
+type CorpusDocMeta = {
+  docId: string; title: string; description: string; category: string;
+  chunkCount: number; lastUpdated: string | null; createdAt: string | null;
 };
+type SPLayer = { layer: number; content: string; previousContent: string | null; updatedAt: string | null };
 
 const MODEL_OPTIONS = [
-  { value: "claude-opus-4-5", label: "Claude Opus 4.5" },
+  { value: "claude-opus-4-6", label: "Claude Opus 4.6" },
   { value: "claude-sonnet-4-6", label: "Claude Sonnet 4.6" },
 ];
+const CORPUS_CATEGORIES = ["Methodology", "Task Chain", "Prompts", "Workflows"] as const;
+const SP_LAYER_LABELS: Record<number, string> = {
+  1: "Layer 1: Identity & Tone",
+  2: "Layer 2: Methodology",
+  3: "Layer 3: RAG Context",
+  4: "Layer 4: User Context",
+};
+const CATEGORY_COLORS: Record<string, { bg: string; text: string }> = {
+  Methodology: { bg: "#DBEAFE", text: "#1E40AF" },
+  "Task Chain": { bg: "#D1FAE5", text: "#065F46" },
+  Prompts: { bg: "#EDE9FE", text: "#5B21B6" },
+  Workflows: { bg: "#FEF3C7", text: "#92400E" },
+};
 
-const fmt = (d: string) =>
-  new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-const fmtShort = (d: string | null) =>
-  d ? new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "—";
+const fmt = (d: string | null) => d ? new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—";
+const fmtShort = (d: string | null) => d ? new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "—";
 const getDomain = (email: string) => email.split("@")[1] ?? "";
+const readFileAsText = (file: File): Promise<string> => new Promise((resolve, reject) => { const r = new FileReader(); r.onload = () => resolve(r.result as string); r.onerror = reject; r.readAsText(file); });
 
-const readFileAsText = (file: File): Promise<string> =>
-  new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result as string);
-    reader.onerror = reject;
-    reader.readAsText(file);
-  });
+function lineDiff(oldText: string, newText: string): Array<{ type: "added" | "removed" | "same"; text: string }> {
+  const oldLines = oldText.split("\n"), newLines = newText.split("\n");
+  const m = oldLines.length, n = newLines.length;
+  if (m > 300 || n > 300) {
+    return [
+      ...oldLines.map((t) => ({ type: "removed" as const, text: t })),
+      ...newLines.map((t) => ({ type: "added" as const, text: t })),
+    ];
+  }
+  const dp: number[][] = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+  for (let i = 1; i <= m; i++) for (let j = 1; j <= n; j++) {
+    dp[i][j] = oldLines[i - 1] === newLines[j - 1] ? dp[i - 1][j - 1] + 1 : Math.max(dp[i - 1][j], dp[i][j - 1]);
+  }
+  const result: Array<{ type: "added" | "removed" | "same"; text: string }> = [];
+  let i = m, j = n;
+  while (i > 0 || j > 0) {
+    if (i > 0 && j > 0 && oldLines[i - 1] === newLines[j - 1]) { result.unshift({ type: "same", text: oldLines[i - 1] }); i--; j--; }
+    else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) { result.unshift({ type: "added", text: newLines[j - 1] }); j--; }
+    else { result.unshift({ type: "removed", text: oldLines[i - 1] }); i--; }
+  }
+  return result;
+}
 
 export default function Admin() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -81,80 +80,45 @@ export default function Admin() {
 
   useEffect(() => {
     const auth = sessionStorage.getItem("adminAuth");
-    if (auth === "true") {
-      setAdminAuthenticated(true);
-      setIsAuthenticated(true);
-      setIsCheckingAuth(false);
-      return;
-    }
-    // Auto-authenticate if the main app session belongs to the admin
-    fetch("/api/auth/me")
-      .then(async (res) => {
-        if (res.ok) {
-          const data = await res.json();
-          if (data?.email?.toLowerCase() === "anthony@iqmeeteq.com") {
-            sessionStorage.setItem("adminAuth", "true");
-            setAdminAuthenticated(true);
-            setIsAuthenticated(true);
-          }
+    if (auth === "true") { setAdminAuthenticated(true); setIsAuthenticated(true); setIsCheckingAuth(false); return; }
+    fetch("/api/auth/me").then(async (res) => {
+      if (res.ok) {
+        const data = await res.json();
+        if (data?.email?.toLowerCase() === "anthony@iqmeeteq.com") {
+          sessionStorage.setItem("adminAuth", "true"); setAdminAuthenticated(true); setIsAuthenticated(true);
         }
-      })
-      .catch(() => {})
-      .finally(() => setIsCheckingAuth(false));
+      }
+    }).catch(() => {}).finally(() => setIsCheckingAuth(false));
   }, []);
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
     if (loginEmail.toLowerCase() === "anthony@iqmeeteq.com" && loginPassword === "95682") {
-      sessionStorage.setItem("adminAuth", "true");
-      setAdminAuthenticated(true);
-      setIsAuthenticated(true);
-    } else {
-      setLoginError("Invalid admin credentials.");
-    }
+      sessionStorage.setItem("adminAuth", "true"); setAdminAuthenticated(true); setIsAuthenticated(true);
+    } else { setLoginError("Invalid admin credentials."); }
   };
 
-  const handleLogout = () => {
-    sessionStorage.removeItem("adminAuth");
-    setAdminAuthenticated(false);
-    setIsAuthenticated(false);
-  };
+  const handleLogout = () => { sessionStorage.removeItem("adminAuth"); setAdminAuthenticated(false); setIsAuthenticated(false); };
 
-  if (isCheckingAuth) {
-    return (
-      <div style={{ minHeight: "100vh", background: "#1A2744", display: "flex", alignItems: "center", justifyContent: "center" }}>
-        <Spinner />
-      </div>
-    );
-  }
+  if (isCheckingAuth) return <div style={{ minHeight: "100vh", background: "#1A2744", display: "flex", alignItems: "center", justifyContent: "center" }}><Spinner /><GlobalStyles /></div>;
 
-  if (!isAuthenticated) {
-    return (
-      <div style={{ minHeight: "100vh", background: "#1A2744", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 24, fontFamily: "'DM Sans', sans-serif" }}>
-        <div style={{ width: "100%", maxWidth: 400, background: "#fff", borderRadius: 12, padding: "40px 36px", boxShadow: "0 8px 32px rgba(0,0,0,0.2)" }}>
-          <div style={{ textAlign: "center", marginBottom: 32 }}>
-            <h1 style={{ fontFamily: "'DM Serif Display', serif", fontSize: 28, color: "#C8963E", margin: "0 0 6px" }}>AI for HHS</h1>
-            <p style={{ fontSize: 14, color: "#6B7280", margin: 0 }}>Admin Dashboard</p>
-          </div>
-          <form onSubmit={handleLogin} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-            <div>
-              <label style={{ display: "block", fontSize: 13, fontWeight: 500, color: "#374151", marginBottom: 5 }}>Email</label>
-              <input type="email" value={loginEmail} onChange={(e) => setLoginEmail(e.target.value)} placeholder="admin@example.com" style={{ width: "100%", border: "1px solid #D1D5DB", borderRadius: 6, padding: "9px 12px", fontSize: 14, color: "#111827", outline: "none", boxSizing: "border-box" }} data-testid="input-admin-email" />
-            </div>
-            <div>
-              <label style={{ display: "block", fontSize: 13, fontWeight: 500, color: "#374151", marginBottom: 5 }}>Password</label>
-              <input type="password" value={loginPassword} onChange={(e) => setLoginPassword(e.target.value)} placeholder="••••••••" style={{ width: "100%", border: "1px solid #D1D5DB", borderRadius: 6, padding: "9px 12px", fontSize: 14, color: "#111827", outline: "none", boxSizing: "border-box" }} data-testid="input-admin-password" />
-            </div>
-            {loginError && <p style={{ color: "#DC2626", fontSize: 13, margin: 0 }}>{loginError}</p>}
-            <button type="submit" style={{ background: "#1A2744", color: "#fff", border: "none", borderRadius: 6, padding: "10px 0", fontSize: 14, fontWeight: 600, cursor: "pointer", fontFamily: "'DM Sans', sans-serif" }} data-testid="btn-admin-login">
-              Log In
-            </button>
-          </form>
+  if (!isAuthenticated) return (
+    <div style={{ minHeight: "100vh", background: "#1A2744", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 24, fontFamily: "'DM Sans', sans-serif" }}>
+      <div style={{ width: "100%", maxWidth: 400, background: "#fff", borderRadius: 12, padding: "40px 36px", boxShadow: "0 8px 32px rgba(0,0,0,0.2)" }}>
+        <div style={{ textAlign: "center", marginBottom: 32 }}>
+          <h1 style={{ fontFamily: "'DM Serif Display', serif", fontSize: 28, color: "#C8963E", margin: "0 0 6px" }}>AI for HHS</h1>
+          <p style={{ fontSize: 14, color: "#6B7280", margin: 0 }}>Admin Dashboard</p>
         </div>
-        <GlobalStyles />
+        <form onSubmit={handleLogin} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          <div><label style={labelStyle}>Email</label><input type="email" value={loginEmail} onChange={(e) => setLoginEmail(e.target.value)} placeholder="admin@example.com" style={{ ...inputStyle(320), padding: "9px 12px" }} /></div>
+          <div><label style={labelStyle}>Password</label><input type="password" value={loginPassword} onChange={(e) => setLoginPassword(e.target.value)} placeholder="••••••••" style={{ ...inputStyle(320), padding: "9px 12px" }} /></div>
+          {loginError && <p style={{ color: "#DC2626", fontSize: 13, margin: 0 }}>{loginError}</p>}
+          <button type="submit" style={{ background: "#1A2744", color: "#fff", border: "none", borderRadius: 6, padding: "10px 0", fontSize: 14, fontWeight: 600, cursor: "pointer", fontFamily: "'DM Sans', sans-serif" }}>Log In</button>
+        </form>
       </div>
-    );
-  }
+      <GlobalStyles />
+    </div>
+  );
 
   return <AdminDashboard onLogout={handleLogout} />;
 }
@@ -168,65 +132,87 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [corpus, setCorpus] = useState<CorpusDoc[]>([]);
-  const [corpusLoading, setCorpusLoading] = useState(false);
+  const [searchEmail, setSearchEmail] = useState("");
+  const [filterCounty, setFilterCounty] = useState("");
+  const [filterCategory, setFilterCategory] = useState("");
+  const [sortField, setSortField] = useState("");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  const [thresholdInput, setThresholdInput] = useState("");
+  const [savingConfig, setSavingConfig] = useState(false);
+
+  /* ── Corpus state ── */
+  const [corpusDocs, setCorpusDocs] = useState<CorpusDocMeta[]>([]);
   const [corpusFetched, setCorpusFetched] = useState(false);
+  const [corpusLoading, setCorpusLoading] = useState(false);
   const [corpusOp, setCorpusOp] = useState<string | null>(null);
   const [corpusOpError, setCorpusOpError] = useState<string | null>(null);
-
+  const [corpusFilter, setCorpusFilter] = useState("");
+  const [uploadTitle, setUploadTitle] = useState("");
+  const [uploadDesc, setUploadDesc] = useState("");
+  const [uploadCategory, setUploadCategory] = useState<string>("Methodology");
   const [uploadDocId, setUploadDocId] = useState("");
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const uploadInputRef = useRef<HTMLInputElement>(null);
   const replaceInputRef = useRef<HTMLInputElement>(null);
   const [replacingDocId, setReplacingDocId] = useState<string | null>(null);
+  const [deletingDoc, setDeletingDoc] = useState<CorpusDocMeta | null>(null);
+  const [deleteText, setDeleteText] = useState("");
+  const [viewModal, setViewModal] = useState<{ docId: string; title: string; content: string } | null>(null);
+  const [viewLoading, setViewLoading] = useState(false);
 
-  const [searchEmail, setSearchEmail] = useState("");
-  const [filterCounty, setFilterCounty] = useState("");
-  const [filterCategory, setFilterCategory] = useState("");
-  const [sortField, setSortField] = useState<string>("");
-  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
-  const [thresholdInput, setThresholdInput] = useState("");
-  const [savingConfig, setSavingConfig] = useState(false);
+  /* ── System prompt state ── */
+  const [spLayers, setSPLayers] = useState<SPLayer[]>([]);
+  const [spFetched, setSPFetched] = useState(false);
+  const [spLoading, setSPLoading] = useState(false);
+  const [activeSpLayer, setActiveSpLayer] = useState(1);
+  const [spDraft, setSPDraft] = useState<Record<number, string>>({});
+  const [spSaving, setSPSaving] = useState(false);
+  const [showDiff, setShowDiff] = useState(false);
+  const [pendingDiff, setPendingDiff] = useState<{ layer: number; old: string; next: string } | null>(null);
+  const [confirmText, setConfirmText] = useState("");
 
   const fetchAll = useCallback(async () => {
-    setLoading(true);
-    setError(null);
+    setLoading(true); setError(null);
     try {
-      const [sRes, uRes, fRes] = await Promise.all([
-        fetch("/api/admin/stats"),
-        fetch("/api/admin/users"),
-        fetch("/api/admin/feedback"),
-      ]);
+      const [sRes, uRes, fRes] = await Promise.all([fetch("/api/admin/stats"), fetch("/api/admin/users"), fetch("/api/admin/feedback")]);
       if (!sRes.ok || !uRes.ok || !fRes.ok) throw new Error("Fetch failed");
       const [sData, uData, fData] = await Promise.all([sRes.json(), uRes.json(), fRes.json()]);
-      setStats(sData);
-      setUsers(uData);
-      setFeedback(fData);
-      setThresholdInput(String(sData.spendThreshold));
-    } catch {
-      setError("Failed to load dashboard data. Please refresh.");
-    }
+      setStats(sData); setUsers(uData); setFeedback(fData); setThresholdInput(String(sData.spendThreshold));
+    } catch { setError("Failed to load dashboard data. Please refresh."); }
     setLoading(false);
   }, []);
 
   const fetchCorpus = useCallback(async () => {
-    setCorpusLoading(true);
+    setCorpusLoading(true); setCorpusOpError(null);
     try {
       const res = await fetch("/api/admin/corpus");
       if (!res.ok) throw new Error("Failed");
-      const data = await res.json();
-      setCorpus(data);
-      setCorpusFetched(true);
-    } catch {
-      setCorpusOpError("Failed to load corpus documents.");
-    }
+      setCorpusDocs(await res.json()); setCorpusFetched(true);
+    } catch { setCorpusOpError("Failed to load corpus documents."); }
     setCorpusLoading(false);
+  }, []);
+
+  const fetchSP = useCallback(async () => {
+    setSPLoading(true);
+    try {
+      const res = await fetch("/api/admin/system-prompt");
+      if (!res.ok) throw new Error("Failed");
+      const layers: SPLayer[] = await res.json();
+      setSPLayers(layers);
+      const drafts: Record<number, string> = {};
+      layers.forEach((l) => { drafts[l.layer] = l.content; });
+      setSPDraft(drafts); setSPFetched(true);
+    } catch { /* silent */ }
+    setSPLoading(false);
   }, []);
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
   useEffect(() => {
-    if (activeTab === "settings" && !corpusFetched) fetchCorpus();
-  }, [activeTab, corpusFetched, fetchCorpus]);
+    if (activeTab === "settings") {
+      if (!corpusFetched) fetchCorpus();
+      if (!spFetched) fetchSP();
+    }
+  }, [activeTab, corpusFetched, spFetched, fetchCorpus, fetchSP]);
 
   const handleModelChange = async (model: string) => {
     if (!stats) return;
@@ -248,52 +234,84 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
     await fetch(`/api/admin/users/${userId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ disabled }) });
   };
 
+  /* ── Corpus handlers ── */
   const handleUploadDoc = async () => {
-    if (!uploadFile || !uploadDocId.trim()) return;
-    setCorpusOp(`Ingesting "${uploadDocId}"…`);
-    setCorpusOpError(null);
+    if (!uploadFile || !uploadTitle.trim()) return;
+    const docId = uploadDocId.trim() || uploadTitle.trim().toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "");
+    setCorpusOp(`Ingesting "${uploadTitle}"…`); setCorpusOpError(null);
     try {
       const content = await readFileAsText(uploadFile);
-      const res = await fetch("/api/admin/corpus", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ docId: uploadDocId.trim(), content }),
-      });
+      const res = await fetch("/api/admin/corpus", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ docId, title: uploadTitle, description: uploadDesc, category: uploadCategory, content }) });
       const data = await res.json();
       if (!res.ok) { setCorpusOpError(data.error || "Upload failed"); }
-      else { setUploadFile(null); setUploadDocId(""); if (uploadInputRef.current) uploadInputRef.current.value = ""; await fetchCorpus(); }
+      else { setUploadFile(null); setUploadTitle(""); setUploadDesc(""); setUploadDocId(""); if (uploadInputRef.current) uploadInputRef.current.value = ""; await fetchCorpus(); }
     } catch { setCorpusOpError("Upload failed."); }
     setCorpusOp(null);
   };
 
   const handleReplaceDoc = async (file: File) => {
     if (!replacingDocId) return;
-    const docId = replacingDocId;
-    setReplacingDocId(null);
-    setCorpusOp(`Re-ingesting "${docId}"…`);
-    setCorpusOpError(null);
+    const docId = replacingDocId; setReplacingDocId(null);
+    setCorpusOp(`Re-ingesting "${docId}"…`); setCorpusOpError(null);
     try {
       const content = await readFileAsText(file);
-      const res = await fetch(`/api/admin/corpus/${encodeURIComponent(docId)}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content }),
-      });
+      const res = await fetch(`/api/admin/corpus/${encodeURIComponent(docId)}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content }) });
       if (!res.ok) { const d = await res.json(); setCorpusOpError(d.error || "Replace failed"); }
       else { await fetchCorpus(); }
     } catch { setCorpusOpError("Replace failed."); }
     setCorpusOp(null);
   };
 
-  const handleDeleteDoc = async (docId: string) => {
-    if (!confirm(`Delete "${docId}" and all its chunks from the corpus?`)) return;
-    setCorpusOp(`Deleting "${docId}"…`);
-    setCorpusOpError(null);
+  const handleConfirmDelete = async () => {
+    if (!deletingDoc || deleteText !== "delete") return;
+    const doc = deletingDoc; setDeletingDoc(null); setDeleteText("");
+    setCorpusOp(`Deleting "${doc.title}"…`); setCorpusOpError(null);
     try {
-      await fetch(`/api/admin/corpus/${encodeURIComponent(docId)}`, { method: "DELETE" });
+      await fetch(`/api/admin/corpus/${encodeURIComponent(doc.docId)}`, { method: "DELETE" });
       await fetchCorpus();
     } catch { setCorpusOpError("Delete failed."); }
     setCorpusOp(null);
+  };
+
+  const handleViewDoc = async (doc: CorpusDocMeta) => {
+    setViewLoading(true);
+    try {
+      const res = await fetch(`/api/admin/corpus/${encodeURIComponent(doc.docId)}/content`);
+      const data = await res.json();
+      setViewModal({ docId: doc.docId, title: doc.title, content: data.content });
+    } catch { setCorpusOpError("Failed to load document content."); }
+    setViewLoading(false);
+  };
+
+  /* ── System prompt handlers ── */
+  const currentSpLayer = spLayers.find((l) => l.layer === activeSpLayer);
+  const currentDraft = spDraft[activeSpLayer] ?? currentSpLayer?.content ?? "";
+  const isDirty = currentDraft !== (currentSpLayer?.content ?? "");
+
+  const handleSPSave = () => {
+    if (!currentSpLayer) return;
+    setPendingDiff({ layer: activeSpLayer, old: currentSpLayer.content, next: currentDraft });
+    setConfirmText(""); setShowDiff(true);
+  };
+
+  const handleSPConfirmSave = async () => {
+    if (!pendingDiff || confirmText !== "confirm") return;
+    setSPSaving(true);
+    try {
+      const res = await fetch(`/api/admin/system-prompt/${pendingDiff.layer}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content: pendingDiff.next }) });
+      if (res.ok) {
+        const updated: SPLayer = await res.json();
+        setSPLayers((prev) => prev.map((l) => l.layer === updated.layer ? updated : l));
+        setSPDraft((prev) => ({ ...prev, [updated.layer]: updated.content }));
+      }
+    } catch { /* silent */ }
+    setShowDiff(false); setPendingDiff(null); setConfirmText(""); setSPSaving(false);
+  };
+
+  const handleSPRevert = async () => {
+    if (!currentSpLayer?.previousContent) return;
+    const prev = currentSpLayer.previousContent;
+    setSPDraft((d) => ({ ...d, [activeSpLayer]: prev }));
   };
 
   const handleSort = (field: string) => {
@@ -303,14 +321,12 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
 
   const counties = [...new Set(users.map((u) => u.county))].sort();
   const categories = [...new Set(users.map((u) => u.serviceCategory))].sort();
-
   const filteredUsers = users.filter((u) => {
     if (searchEmail && !u.email.toLowerCase().includes(searchEmail.toLowerCase())) return false;
     if (filterCounty && u.county !== filterCounty) return false;
     if (filterCategory && u.serviceCategory !== filterCategory) return false;
     return true;
   });
-
   const sortedUsers = sortField ? [...filteredUsers].sort((a: any, b: any) => {
     let av = a[sortField], bv = b[sortField];
     if (sortField === "domain") { av = getDomain(a.email); bv = getDomain(b.email); }
@@ -322,38 +338,21 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
     return 0;
   }) : filteredUsers;
 
+  const filteredCorpus = corpusDocs.filter((d) => {
+    if (!corpusFilter) return true;
+    const q = corpusFilter.toLowerCase();
+    return d.title.toLowerCase().includes(q) || d.description.toLowerCase().includes(q);
+  });
+
   const unmatchedUsers = users.filter((u) => !u.domainMatch);
 
-  if (loading) {
-    return (
-      <div style={{ minHeight: "100vh", background: "#F5F5F5", display: "flex", alignItems: "center", justifyContent: "center" }}>
-        <Spinner color="#C8963E" size={36} />
-        <GlobalStyles />
-      </div>
-    );
-  }
-
-  if (error || !stats) {
-    return (
-      <div style={{ minHeight: "100vh", background: "#F5F5F5", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'DM Sans', sans-serif" }}>
-        <div style={{ textAlign: "center" }}>
-          <p style={{ color: "#DC2626", marginBottom: 14 }}>{error ?? "Unknown error"}</p>
-          <button onClick={fetchAll} style={btnStyle("#1A2744")}>Retry</button>
-        </div>
-      </div>
-    );
-  }
+  if (loading) return <div style={{ minHeight: "100vh", background: "#F5F5F5", display: "flex", alignItems: "center", justifyContent: "center" }}><Spinner color="#C8963E" size={36} /><GlobalStyles /></div>;
+  if (error || !stats) return <div style={{ minHeight: "100vh", background: "#F5F5F5", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'DM Sans', sans-serif" }}><div style={{ textAlign: "center" }}><p style={{ color: "#DC2626", marginBottom: 14 }}>{error ?? "Unknown error"}</p><button onClick={fetchAll} style={btnStyle("#1A2744")}>Retry</button></div></div>;
 
   const totalRatings = stats.thumbsUpCount + stats.thumbsDownCount;
   const upPct = totalRatings > 0 ? Math.round((stats.thumbsUpCount / totalRatings) * 100) : 0;
   const maxTask = Math.max(...stats.taskLauncherUsage.map((t) => t.count), 1);
-  const TABS: { id: AdminTab; label: string }[] = [
-    { id: "dashboard", label: "Dashboard" },
-    { id: "users", label: "Users" },
-    { id: "feedback", label: "Feedback" },
-    { id: "settings", label: "Settings" },
-  ];
-
+  const TABS: { id: AdminTab; label: string }[] = [{ id: "dashboard", label: "Dashboard" }, { id: "users", label: "Users" }, { id: "feedback", label: "Feedback" }, { id: "settings", label: "Settings" }];
   const TH = ({ label, field }: { label: string; field?: string }) => (
     <th onClick={field ? () => handleSort(field) : undefined} style={{ padding: "10px 14px", textAlign: "left", fontSize: 12, fontWeight: 600, color: "#6B7280", borderBottom: "1px solid #E5E7EB", whiteSpace: "nowrap", cursor: field ? "pointer" : "default", userSelect: "none", background: "#FAFAFA" }}>
       {label}{field && <span style={{ marginLeft: 4, color: sortField === field ? "#C8963E" : "#9CA3AF", fontSize: 11 }}>{sortField === field ? (sortDir === "asc" ? "▲" : "▼") : "⇅"}</span>}
@@ -373,121 +372,60 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
           <span style={{ fontFamily: "'DM Serif Display', serif", fontSize: 22, color: "#C8963E", fontWeight: 700 }}>AI for HHS</span>
           <span style={{ fontSize: 13, color: "#9CA3AF" }}>Admin Dashboard</span>
         </div>
-        <button onClick={onLogout} style={{ background: "none", border: "1px solid rgba(255,255,255,0.2)", color: "#D1D5DB", borderRadius: 6, padding: "6px 16px", fontSize: 13, cursor: "pointer", fontFamily: "'DM Sans', sans-serif" }} data-testid="btn-admin-logout">
-          Sign Out
-        </button>
+        <button onClick={onLogout} style={{ background: "none", border: "1px solid rgba(255,255,255,0.2)", color: "#D1D5DB", borderRadius: 6, padding: "6px 16px", fontSize: 13, cursor: "pointer", fontFamily: "'DM Sans', sans-serif" }}>Sign Out</button>
       </header>
 
       {/* TAB BAR */}
       <div style={{ background: "#fff", borderBottom: "1px solid #E5E7EB", display: "flex", padding: "0 24px", flexShrink: 0 }}>
         {TABS.map((tab) => (
-          <button key={tab.id} onClick={() => setActiveTab(tab.id)} style={{ background: "none", border: "none", padding: "14px 20px", fontSize: 14, fontWeight: activeTab === tab.id ? 600 : 400, color: activeTab === tab.id ? "#C8963E" : "#6B7280", cursor: "pointer", borderBottom: activeTab === tab.id ? "2px solid #C8963E" : "2px solid transparent", fontFamily: "'DM Sans', sans-serif", marginBottom: -1 }}>
-            {tab.label}
-          </button>
+          <button key={tab.id} onClick={() => setActiveTab(tab.id)} style={{ background: "none", border: "none", padding: "14px 20px", fontSize: 14, fontWeight: activeTab === tab.id ? 600 : 400, color: activeTab === tab.id ? "#C8963E" : "#6B7280", cursor: "pointer", borderBottom: activeTab === tab.id ? "2px solid #C8963E" : "2px solid transparent", fontFamily: "'DM Sans', sans-serif", marginBottom: -1 }}>{tab.label}</button>
         ))}
       </div>
 
-      {/* TAB CONTENT */}
       <main style={{ flex: 1, maxWidth: 1280, width: "100%", margin: "0 auto", padding: "28px 24px", display: "flex", flexDirection: "column", gap: 24 }}>
 
-        {/* ── TAB 1: DASHBOARD ── */}
+        {/* ── DASHBOARD TAB ── */}
         {activeTab === "dashboard" && (
           <>
-            {/* Row 1 summary cards */}
             <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 16 }}>
               <StatCard title="Total Users" value={stats.totalUsers} />
               <StatCard title="New This Month" value={stats.newThisMonth} />
               <StatCard title="Weekly Active" value={stats.weeklyActive} sub="unique users, last 7 days" />
               <div style={{ background: "#FEF2F2", border: "1.5px solid #DC2626", borderRadius: 10, padding: "20px 24px" }}>
-                <div style={{ fontSize: 12, fontWeight: 600, color: "#991B1B", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>Unmatched Domains This Week</div>
+                <div style={cardTitleStyle}>Unmatched Domains This Week</div>
                 <div style={{ fontSize: 30, fontWeight: 700, color: "#DC2626", lineHeight: 1 }}>{stats.unmatchedDomainsThisWeek}</div>
                 <div style={{ fontSize: 12, color: "#DC2626", marginTop: 5, opacity: 0.75 }}>new registrations, no domain match</div>
               </div>
             </div>
-
-            {/* Row 2 summary cards */}
             <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 16 }}>
-              <div style={cardStyle}>
-                <div style={cardTitleStyle}>Returning vs. One-Time</div>
-                <div style={{ ...bigNumStyle }}>{stats.returningUsers} <span style={{ fontSize: 16, color: "#6B7280", fontWeight: 400 }}>/ {stats.oneTimeUsers}</span></div>
-                <div style={subStyle}>returning / one-time</div>
-              </div>
+              <div style={cardStyle}><div style={cardTitleStyle}>Returning vs. One-Time</div><div style={bigNumStyle}>{stats.returningUsers} <span style={{ fontSize: 16, color: "#6B7280", fontWeight: 400 }}>/ {stats.oneTimeUsers}</span></div><div style={subStyle}>returning / one-time</div></div>
               <StatCard title="Total Conversations" value={stats.totalConversations} />
               <StatCard title="Avg Messages / Conversation" value={stats.avgMessagesPerConversation.toFixed(1)} />
-              <div style={cardStyle}>
-                <div style={cardTitleStyle}>Thumbs Up / Down</div>
-                <div style={bigNumStyle}>{upPct}%<span style={{ fontSize: 15, fontWeight: 400, color: "#6B7280" }}> up</span></div>
-                <div style={subStyle}>{stats.thumbsUpCount} up / {stats.thumbsDownCount} down</div>
-              </div>
+              <div style={cardStyle}><div style={cardTitleStyle}>Thumbs Up / Down</div><div style={bigNumStyle}>{upPct}%<span style={{ fontSize: 15, fontWeight: 400, color: "#6B7280" }}> up</span></div><div style={subStyle}>{stats.thumbsUpCount} up / {stats.thumbsDownCount} down</div></div>
             </div>
-
-            {/* Cost card */}
             <div style={{ ...cardStyle, display: "flex", alignItems: "center", gap: 32, flexWrap: "wrap" }}>
-              <div>
-                <div style={cardTitleStyle}>Est. Cost This Month</div>
-                <div style={{ fontSize: 34, fontWeight: 700, color: "#111827" }}>${stats.currentMonthSpend.toFixed(2)}</div>
-              </div>
+              <div><div style={cardTitleStyle}>Est. Cost This Month</div><div style={{ fontSize: 34, fontWeight: 700, color: "#111827" }}>${stats.currentMonthSpend.toFixed(2)}</div></div>
               <div style={{ color: "#9CA3AF", fontSize: 13 }}>{stats.currentMonthTokens.toLocaleString()} tokens</div>
             </div>
-
-            {/* Breakdowns */}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-              <div style={cardStyle}>
-                <div style={sectionTitleStyle}>Users by County</div>
-                <div style={{ overflowY: "auto", maxHeight: 300 }}>
-                  <table style={tblStyle}>
-                    <tbody>
-                      {stats.usersByCounty.map((c, i) => (
-                        <tr key={i} style={{ borderBottom: "1px solid #F3F4F6" }}>
-                          <td style={{ padding: "7px 0", fontSize: 13, color: "#374151" }}>{c.label}</td>
-                          <td style={{ padding: "7px 0", fontSize: 13, fontWeight: 600, textAlign: "right" }}>{c.count}</td>
-                        </tr>
-                      ))}
-                      {stats.usersByCounty.length === 0 && <tr><td style={{ color: "#9CA3AF", fontSize: 13, padding: 8 }} colSpan={2}>No data yet</td></tr>}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-              <div style={cardStyle}>
-                <div style={sectionTitleStyle}>Users by Service Category</div>
-                <div style={{ overflowY: "auto", maxHeight: 300 }}>
-                  <table style={tblStyle}>
-                    <tbody>
-                      {stats.usersByServiceCategory.map((c, i) => (
-                        <tr key={i} style={{ borderBottom: "1px solid #F3F4F6" }}>
-                          <td style={{ padding: "7px 0", fontSize: 13, color: "#374151" }}>{c.label}</td>
-                          <td style={{ padding: "7px 0", fontSize: 13, fontWeight: 600, textAlign: "right" }}>{c.count}</td>
-                        </tr>
-                      ))}
-                      {stats.usersByServiceCategory.length === 0 && <tr><td style={{ color: "#9CA3AF", fontSize: 13, padding: 8 }} colSpan={2}>No data yet</td></tr>}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
+              <div style={cardStyle}><div style={sectionTitleStyle}>Users by County</div><div style={{ overflowY: "auto", maxHeight: 300 }}><table style={tblStyle}><tbody>{stats.usersByCounty.map((c, i) => <tr key={i} style={{ borderBottom: "1px solid #F3F4F6" }}><td style={{ padding: "7px 0", fontSize: 13, color: "#374151" }}>{c.label}</td><td style={{ padding: "7px 0", fontSize: 13, fontWeight: 600, textAlign: "right" }}>{c.count}</td></tr>)}{stats.usersByCounty.length === 0 && <tr><td style={{ color: "#9CA3AF", fontSize: 13, padding: 8 }} colSpan={2}>No data yet</td></tr>}</tbody></table></div></div>
+              <div style={cardStyle}><div style={sectionTitleStyle}>Users by Service Category</div><div style={{ overflowY: "auto", maxHeight: 300 }}><table style={tblStyle}><tbody>{stats.usersByServiceCategory.map((c, i) => <tr key={i} style={{ borderBottom: "1px solid #F3F4F6" }}><td style={{ padding: "7px 0", fontSize: 13, color: "#374151" }}>{c.label}</td><td style={{ padding: "7px 0", fontSize: 13, fontWeight: 600, textAlign: "right" }}>{c.count}</td></tr>)}{stats.usersByServiceCategory.length === 0 && <tr><td style={{ color: "#9CA3AF", fontSize: 13, padding: 8 }} colSpan={2}>No data yet</td></tr>}</tbody></table></div></div>
             </div>
-
-            {/* Task launcher ranking */}
             <div style={cardStyle}>
               <div style={sectionTitleStyle}>Task Launcher Ranking</div>
-              {stats.taskLauncherUsage.length === 0 ? (
-                <p style={{ color: "#9CA3AF", fontSize: 13, margin: 0 }}>No task launcher taps yet.</p>
-              ) : (
+              {stats.taskLauncherUsage.length === 0 ? <p style={{ color: "#9CA3AF", fontSize: 13, margin: 0 }}>No task launcher taps yet.</p> : (
                 <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
                   {stats.taskLauncherUsage.map((t, i) => (
                     <div key={i} style={{ display: "flex", alignItems: "center", gap: 14 }}>
                       <span style={{ fontSize: 12, fontWeight: 700, color: "#6B7280", width: 22, textAlign: "right", flexShrink: 0 }}>#{i + 1}</span>
                       <span style={{ fontSize: 13, color: "#374151", flex: "0 0 220px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.label}</span>
-                      <div style={{ flex: 1, height: 10, background: "#F3F4F6", borderRadius: 5 }}>
-                        <div style={{ height: "100%", width: `${Math.round((t.count / maxTask) * 100)}%`, background: "#C8963E", borderRadius: 5, transition: "width 0.3s" }} />
-                      </div>
+                      <div style={{ flex: 1, height: 10, background: "#F3F4F6", borderRadius: 5 }}><div style={{ height: "100%", width: `${Math.round((t.count / maxTask) * 100)}%`, background: "#C8963E", borderRadius: 5 }} /></div>
                       <span style={{ fontSize: 13, fontWeight: 600, width: 32, textAlign: "right", flexShrink: 0 }}>{t.count}</span>
                     </div>
                   ))}
                 </div>
               )}
             </div>
-
-            {/* Unmatched domain table */}
             <div style={{ background: "#fff", borderRadius: 10, boxShadow: "0 1px 4px rgba(0,0,0,0.07)", border: "1.5px solid #DC2626", overflow: "hidden" }}>
               <div style={{ padding: "14px 24px 12px", display: "flex", alignItems: "center", gap: 10, borderBottom: "1px solid #FEE2E2" }}>
                 <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#DC2626", flexShrink: 0 }} />
@@ -495,24 +433,9 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
               </div>
               <div style={{ overflowX: "auto" }}>
                 <table style={tblStyle}>
-                  <thead>
-                    <tr>
-                      {["Email", "Domain", "County", "Service Category", "Registered", "Connection Explanation"].map((h) => (
-                        <th key={h} style={{ padding: "10px 14px", textAlign: "left", fontSize: 12, fontWeight: 600, color: "#6B7280", borderBottom: "1px solid #E5E7EB", whiteSpace: "nowrap", background: "#FAFAFA" }}>{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
+                  <thead><tr>{["Email","Domain","County","Service Category","Registered","Connection Explanation"].map((h) => <th key={h} style={{ padding: "10px 14px", textAlign: "left", fontSize: 12, fontWeight: 600, color: "#6B7280", borderBottom: "1px solid #E5E7EB", whiteSpace: "nowrap", background: "#FAFAFA" }}>{h}</th>)}</tr></thead>
                   <tbody>
-                    {unmatchedUsers.map((u) => (
-                      <tr key={u.id}>
-                        <TD>{u.email}</TD>
-                        <TD><span style={{ fontFamily: "monospace", fontSize: 12 }}>{getDomain(u.email)}</span></TD>
-                        <TD>{u.county}</TD>
-                        <TD>{u.serviceCategory}</TD>
-                        <TD style={{ whiteSpace: "nowrap" }}>{fmt(u.createdAt)}</TD>
-                        <TD style={{ color: u.domainNote ? "#374151" : "#9CA3AF", fontStyle: u.domainNote ? "normal" : "italic" }}>{u.domainNote || "—"}</TD>
-                      </tr>
-                    ))}
+                    {unmatchedUsers.map((u) => <tr key={u.id}><TD>{u.email}</TD><TD><span style={{ fontFamily: "monospace", fontSize: 12 }}>{getDomain(u.email)}</span></TD><TD>{u.county}</TD><TD>{u.serviceCategory}</TD><TD style={{ whiteSpace: "nowrap" }}>{fmt(u.createdAt)}</TD><TD style={{ color: u.domainNote ? "#374151" : "#9CA3AF", fontStyle: u.domainNote ? "normal" : "italic" }}>{u.domainNote || "—"}</TD></tr>)}
                     {unmatchedUsers.length === 0 && <tr><td colSpan={6} style={{ padding: 20, textAlign: "center", color: "#9CA3AF", fontSize: 13 }}>No unmatched domain registrations</td></tr>}
                   </tbody>
                 </table>
@@ -521,40 +444,20 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
           </>
         )}
 
-        {/* ── TAB 2: USERS ── */}
+        {/* ── USERS TAB ── */}
         {activeTab === "users" && (
           <div style={cardStyle}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12, marginBottom: 16 }}>
-              <div style={sectionTitleStyle}>
-                {filteredUsers.length < users.length ? `Showing ${filteredUsers.length} of ${users.length} users` : `Total Users: ${users.length}`}
-              </div>
+              <div style={sectionTitleStyle}>{filteredUsers.length < users.length ? `Showing ${filteredUsers.length} of ${users.length} users` : `Total Users: ${users.length}`}</div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
                 <input type="text" placeholder="Search by email…" value={searchEmail} onChange={(e) => setSearchEmail(e.target.value)} style={inputStyle(200)} />
-                <select value={filterCounty} onChange={(e) => setFilterCounty(e.target.value)} style={selectStyle}>
-                  <option value="">All Counties</option>
-                  {counties.map((c) => <option key={c} value={c}>{c}</option>)}
-                </select>
-                <select value={filterCategory} onChange={(e) => setFilterCategory(e.target.value)} style={selectStyle}>
-                  <option value="">All Categories</option>
-                  {categories.map((c) => <option key={c} value={c}>{c}</option>)}
-                </select>
+                <select value={filterCounty} onChange={(e) => setFilterCounty(e.target.value)} style={selectStyle}><option value="">All Counties</option>{counties.map((c) => <option key={c} value={c}>{c}</option>)}</select>
+                <select value={filterCategory} onChange={(e) => setFilterCategory(e.target.value)} style={selectStyle}><option value="">All Categories</option>{categories.map((c) => <option key={c} value={c}>{c}</option>)}</select>
               </div>
             </div>
             <div style={{ overflowX: "auto" }}>
               <table style={tblStyle}>
-                <thead>
-                  <tr>
-                    <TH label="Email" field="email" />
-                    <TH label="Domain" field="domain" />
-                    <TH label="County" field="county" />
-                    <TH label="Service Category" field="serviceCategory" />
-                    <TH label="Registered" field="createdAt" />
-                    <TH label="Last Active" field="lastActive" />
-                    <TH label="Conversations" field="conversationCount" />
-                    <TH label="Match" field="match" />
-                    <TH label="Status" field="status" />
-                  </tr>
-                </thead>
+                <thead><tr><TH label="Email" field="email" /><TH label="Domain" field="domain" /><TH label="County" field="county" /><TH label="Service Category" field="serviceCategory" /><TH label="Registered" field="createdAt" /><TH label="Last Active" field="lastActive" /><TH label="Conversations" field="conversationCount" /><TH label="Match" field="match" /><TH label="Status" field="status" /></tr></thead>
                 <tbody>
                   {sortedUsers.map((u) => (
                     <tr key={u.id} style={{ background: u.disabled ? "#FEF2F2" : "transparent" }}>
@@ -565,11 +468,7 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
                       <TD style={{ whiteSpace: "nowrap" }}>{fmt(u.createdAt)}</TD>
                       <TD style={{ whiteSpace: "nowrap" }}>{fmtShort(u.lastActive)}</TD>
                       <TD style={{ textAlign: "center" }}>{u.conversationCount}</TD>
-                      <TD>
-                        {u.domainMatch
-                          ? <span style={{ background: "#D1FAE5", color: "#065F46", fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 10 }}>Yes</span>
-                          : <span style={{ background: "#FEE2E2", color: "#991B1B", fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 10 }}>No</span>}
-                      </TD>
+                      <TD>{u.domainMatch ? <span style={{ background: "#D1FAE5", color: "#065F46", fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 10 }}>Yes</span> : <span style={{ background: "#FEE2E2", color: "#991B1B", fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 10 }}>No</span>}</TD>
                       <TD><ToggleSwitch enabled={!u.disabled} onChange={(v) => handleToggleDisabled(u.id, !v)} /></TD>
                     </tr>
                   ))}
@@ -580,20 +479,14 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
           </div>
         )}
 
-        {/* ── TAB 3: FEEDBACK ── */}
+        {/* ── FEEDBACK TAB ── */}
         {activeTab === "feedback" && (
           <div style={cardStyle}>
-            <div style={{ ...sectionTitleStyle, marginBottom: 4 }}>Feedback</div>
+            <div style={sectionTitleStyle}>Feedback</div>
             <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 14 }}>Total Entries: {feedback.length}</div>
             <div style={{ overflowX: "auto" }}>
               <table style={tblStyle}>
-                <thead>
-                  <tr>
-                    {["Date", "User Email", "Type", "What They Were Trying To Do", "File Size"].map((h) => (
-                      <th key={h} style={{ padding: "10px 14px", textAlign: "left", fontSize: 12, fontWeight: 600, color: "#6B7280", borderBottom: "1px solid #E5E7EB", whiteSpace: "nowrap", background: "#FAFAFA" }}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
+                <thead><tr>{["Date","User Email","Type","What They Were Trying To Do","File Size"].map((h) => <th key={h} style={{ padding: "10px 14px", textAlign: "left", fontSize: 12, fontWeight: 600, color: "#6B7280", borderBottom: "1px solid #E5E7EB", whiteSpace: "nowrap", background: "#FAFAFA" }}>{h}</th>)}</tr></thead>
                 <tbody>
                   {feedback.map((f) => (
                     <tr key={f.id}>
@@ -611,16 +504,16 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
           </div>
         )}
 
-        {/* ── TAB 4: SETTINGS ── */}
+        {/* ── SETTINGS TAB ── */}
         {activeTab === "settings" && (
           <>
-            {/* Model controls */}
+            {/* 1. Model Controls */}
             <div style={cardStyle}>
               <div style={sectionTitleStyle}>Model Controls</div>
               <div style={{ display: "flex", flexWrap: "wrap", alignItems: "flex-end", gap: 32 }}>
                 <div>
                   <label style={labelStyle}>Active Model</label>
-                  <select value={stats.activeModel} onChange={(e) => handleModelChange(e.target.value)} style={{ ...selectStyle, fontSize: 14, padding: "9px 36px 9px 12px" }} data-testid="select-model">
+                  <select value={stats.activeModel} onChange={(e) => handleModelChange(e.target.value)} style={{ ...selectStyle, fontSize: 14, padding: "9px 36px 9px 12px" }}>
                     {MODEL_OPTIONS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
                   </select>
                   <div style={hintStyle}>Applies to all new conversations</div>
@@ -629,164 +522,197 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
                   <label style={labelStyle}>Auto-Downgrade Threshold</label>
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                     <span style={{ fontSize: 14, color: "#6B7280" }}>$</span>
-                    <input type="number" value={thresholdInput} onChange={(e) => setThresholdInput(e.target.value)} style={{ ...inputStyle(90), padding: "8px 10px" }} data-testid="input-threshold" />
+                    <input type="number" value={thresholdInput} onChange={(e) => setThresholdInput(e.target.value)} style={{ ...inputStyle(90), padding: "8px 10px" }} />
                     <span style={{ fontSize: 13, color: "#6B7280" }}>/ month</span>
-                    <button onClick={handleThresholdSave} disabled={savingConfig} style={btnStyle("#1A2744")}>
-                      {savingConfig ? "Saving…" : "Save"}
-                    </button>
+                    <button onClick={handleThresholdSave} disabled={savingConfig} style={btnStyle("#1A2744", savingConfig)}>{savingConfig ? "Saving…" : "Save"}</button>
                   </div>
                   <div style={hintStyle}>Downgrades to Sonnet when exceeded, resets on 1st of month</div>
                 </div>
               </div>
             </div>
 
-            {/* Corpus management */}
+            {/* 2. Corpus Documents */}
             <div style={cardStyle}>
-              <div style={sectionTitleStyle}>Corpus Management</div>
-              <p style={{ fontSize: 13, color: "#6B7280", marginTop: -8, marginBottom: 20 }}>
-                Manage the markdown documents used for RAG context. Upload, replace, or delete documents below.
-              </p>
+              <div style={sectionTitleStyle}>Corpus Documents</div>
+              <p style={{ fontSize: 13, color: "#6B7280", margin: "-8px 0 20px" }}>Documents in the RAG corpus inform the chatbot's responses. Upload markdown files to add knowledge — methodology frameworks, task chains, prompt libraries, and workflows.</p>
 
-              {corpusOp && (
-                <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", background: "#EFF6FF", borderRadius: 8, marginBottom: 16, fontSize: 13, color: "#1D4ED8" }}>
-                  <Spinner color="#1D4ED8" size={16} />
-                  {corpusOp}
+              {corpusOp && <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", background: "#EFF6FF", borderRadius: 8, marginBottom: 16, fontSize: 13, color: "#1D4ED8" }}><Spinner color="#1D4ED8" size={16} />{corpusOp}</div>}
+              {corpusOpError && <div style={{ padding: "10px 14px", background: "#FEF2F2", borderRadius: 8, marginBottom: 16, fontSize: 13, color: "#DC2626" }}>{corpusOpError}</div>}
+
+              {/* Upload form */}
+              <div style={{ background: "#F9FAFB", border: "1px solid #E5E7EB", borderRadius: 8, padding: "16px 20px", marginBottom: 20 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 14 }}>Upload New Document</div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "flex-end" }}>
+                  <div><label style={labelStyle}>Title *</label><input type="text" value={uploadTitle} onChange={(e) => setUploadTitle(e.target.value)} placeholder="e.g. RICECO Framework" style={{ ...inputStyle(200), padding: "8px 10px" }} /></div>
+                  <div><label style={labelStyle}>Description</label><input type="text" value={uploadDesc} onChange={(e) => setUploadDesc(e.target.value)} placeholder="Brief description" style={{ ...inputStyle(240), padding: "8px 10px" }} /></div>
+                  <div>
+                    <label style={labelStyle}>Category</label>
+                    <select value={uploadCategory} onChange={(e) => setUploadCategory(e.target.value)} style={selectStyle}>
+                      {CORPUS_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label style={labelStyle}>File (.md or .txt)</label>
+                    <input ref={uploadInputRef} type="file" accept=".md,.txt" onChange={(e) => { const f = e.target.files?.[0]; if (!f) return; setUploadFile(f); if (!uploadDocId) setUploadDocId(f.name.replace(/\.(md|txt)$/i, "").replace(/\s+/g, "-").toLowerCase()); }} style={{ display: "block", fontSize: 13, color: "#374151" }} />
+                  </div>
+                  <button onClick={handleUploadDoc} disabled={!uploadFile || !uploadTitle.trim() || !!corpusOp} style={btnStyle("#1A2744", !uploadFile || !uploadTitle.trim() || !!corpusOp)}>Upload &amp; Ingest</button>
                 </div>
-              )}
-              {corpusOpError && (
-                <div style={{ padding: "10px 14px", background: "#FEF2F2", borderRadius: 8, marginBottom: 16, fontSize: 13, color: "#DC2626" }}>
-                  {corpusOpError}
-                </div>
-              )}
+                {uploadFile && <div style={{ marginTop: 8, fontSize: 12, color: "#6B7280" }}>Selected: <strong>{uploadFile.name}</strong> ({(uploadFile.size / 1024).toFixed(1)} KB)</div>}
+              </div>
+
+              {/* Search */}
+              <div style={{ marginBottom: 14 }}>
+                <input type="text" value={corpusFilter} onChange={(e) => setCorpusFilter(e.target.value)} placeholder="Search by title or description…" style={{ ...inputStyle(300), padding: "8px 12px" }} />
+              </div>
 
               {/* Document list */}
-              <div style={{ marginBottom: 28 }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 10 }}>
-                  Current Documents ({corpus.length})
+              {corpusLoading ? (
+                <div style={{ display: "flex", alignItems: "center", gap: 8, color: "#6B7280", fontSize: 13, padding: 16 }}><Spinner size={16} color="#9CA3AF" /> Loading…</div>
+              ) : filteredCorpus.length === 0 ? (
+                <p style={{ fontSize: 13, color: "#9CA3AF", margin: 0, padding: "12px 0" }}>{corpusDocs.length === 0 ? "No documents in corpus yet." : "No documents match your search."}</p>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+                  {filteredCorpus.map((doc) => {
+                    const catColor = CATEGORY_COLORS[doc.category] ?? { bg: "#F3F4F6", text: "#374151" };
+                    const isDeleting = deletingDoc?.docId === doc.docId;
+                    return (
+                      <div key={doc.docId}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "12px 4px", borderBottom: "1px solid #F3F4F6" }}>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                              <span style={{ fontSize: 14, fontWeight: 600, color: "#111827" }}>{doc.title}</span>
+                              <span style={{ fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 10, background: catColor.bg, color: catColor.text }}>{doc.category}</span>
+                            </div>
+                            {doc.description && <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>{doc.description}</div>}
+                            <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 3 }}>{doc.chunkCount} chunks · uploaded {fmt(doc.createdAt)}</div>
+                          </div>
+                          <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                            <button onClick={() => handleViewDoc(doc)} disabled={!!corpusOp || viewLoading} style={smallBtn("#6B7280")}>View</button>
+                            <button onClick={() => { setReplacingDocId(doc.docId); replaceInputRef.current?.click(); }} disabled={!!corpusOp} style={smallBtn("#1A2744")}>Replace</button>
+                            <button onClick={() => { setDeletingDoc(doc); setDeleteText(""); }} disabled={!!corpusOp} style={smallBtn("#DC2626")}>Delete</button>
+                          </div>
+                        </div>
+                        {isDeleting && (
+                          <div style={{ margin: "0 0 8px 0", padding: "14px 16px", background: "#FFF7F7", border: "1px solid #FECACA", borderRadius: 8 }}>
+                            <p style={{ fontSize: 13, color: "#374151", margin: "0 0 10px", lineHeight: 1.5 }}>
+                              Delete <strong>"{doc.title}"</strong>? This removes the document and all its chunks from the chatbot's knowledge. This cannot be undone.
+                            </p>
+                            <label style={{ fontSize: 12, color: "#6B7280", fontWeight: 500 }}>Type <code style={{ background: "#FEE2E2", padding: "1px 4px", borderRadius: 3 }}>delete</code> to confirm:</label>
+                            <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+                              <input type="text" value={deleteText} onChange={(e) => setDeleteText(e.target.value)} placeholder="delete" style={{ ...inputStyle(120), padding: "7px 10px" }} />
+                              <button onClick={handleConfirmDelete} disabled={deleteText !== "delete"} style={btnStyle("#DC2626", deleteText !== "delete")}>Confirm</button>
+                              <button onClick={() => { setDeletingDoc(null); setDeleteText(""); }} style={btnStyle("#6B7280")}>Cancel</button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
-                {corpusLoading && !corpusFetched ? (
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, color: "#6B7280", fontSize: 13 }}><Spinner size={16} color="#9CA3AF" /> Loading…</div>
-                ) : corpus.length === 0 ? (
-                  <p style={{ fontSize: 13, color: "#9CA3AF", margin: 0 }}>No documents in corpus yet.</p>
-                ) : (
-                  <div style={{ overflowX: "auto" }}>
-                    <table style={tblStyle}>
-                      <thead>
-                        <tr>
-                          {["Document ID", "Chunks", "Last Updated", "Actions"].map((h) => (
-                            <th key={h} style={{ padding: "9px 14px", textAlign: "left", fontSize: 12, fontWeight: 600, color: "#6B7280", borderBottom: "1px solid #E5E7EB", whiteSpace: "nowrap", background: "#FAFAFA" }}>{h}</th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {corpus.map((doc) => (
-                          <tr key={doc.docId}>
-                            <TD><span style={{ fontFamily: "monospace", fontSize: 13, fontWeight: 500 }}>{doc.docId}</span></TD>
-                            <TD style={{ textAlign: "center" }}>{doc.chunkCount}</TD>
-                            <TD style={{ whiteSpace: "nowrap" }}>{fmt(doc.lastUpdated)}</TD>
-                            <TD>
-                              <div style={{ display: "flex", gap: 8 }}>
-                                <button
-                                  onClick={() => { setReplacingDocId(doc.docId); replaceInputRef.current?.click(); }}
-                                  disabled={!!corpusOp}
-                                  style={{ background: "#F3F4F6", border: "1px solid #D1D5DB", borderRadius: 5, padding: "4px 12px", fontSize: 12, cursor: corpusOp ? "not-allowed" : "pointer", color: "#374151", fontFamily: "'DM Sans', sans-serif" }}
-                                >
-                                  Replace
-                                </button>
-                                <button
-                                  onClick={() => handleDeleteDoc(doc.docId)}
-                                  disabled={!!corpusOp}
-                                  style={{ background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 5, padding: "4px 12px", fontSize: 12, cursor: corpusOp ? "not-allowed" : "pointer", color: "#DC2626", fontFamily: "'DM Sans', sans-serif" }}
-                                >
-                                  Delete
-                                </button>
-                              </div>
-                            </TD>
-                          </tr>
+              )}
+
+              <input ref={replaceInputRef} type="file" accept=".md,.txt" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; if (f) handleReplaceDoc(f); if (replaceInputRef.current) replaceInputRef.current.value = ""; }} />
+            </div>
+
+            {/* 3. System Prompt */}
+            <div style={cardStyle}>
+              <div style={sectionTitleStyle}>System Prompt</div>
+              <p style={{ fontSize: 13, color: "#6B7280", margin: "-8px 0 20px" }}>
+                The system prompt controls how the chatbot behaves — its tone, coaching logic, data safety behavior, and how it uses your service area context. Changes take effect on the next new conversation.
+              </p>
+
+              {spLoading && !spFetched ? (
+                <div style={{ display: "flex", alignItems: "center", gap: 8, color: "#6B7280", fontSize: 13 }}><Spinner size={16} color="#9CA3AF" /> Loading…</div>
+              ) : (
+                <>
+                  {/* Sub-tabs */}
+                  <div style={{ display: "flex", borderBottom: "1px solid #E5E7EB", marginBottom: 20 }}>
+                    {[1, 2, 3, 4].map((n) => (
+                      <button key={n} onClick={() => setActiveSpLayer(n)} style={{ background: "none", border: "none", padding: "10px 16px", fontSize: 13, fontWeight: activeSpLayer === n ? 600 : 400, color: activeSpLayer === n ? "#1A2744" : "#6B7280", cursor: "pointer", borderBottom: activeSpLayer === n ? "2px solid #1A2744" : "2px solid transparent", fontFamily: "'DM Sans', sans-serif", marginBottom: -1, whiteSpace: "nowrap" }}>
+                        {SP_LAYER_LABELS[n]}
+                      </button>
+                    ))}
+                  </div>
+
+                  {(activeSpLayer === 3 || activeSpLayer === 4) && (
+                    <div style={{ padding: "10px 14px", background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 6, marginBottom: 14, fontSize: 13, color: "#92400E" }}>
+                      {activeSpLayer === 3
+                        ? "This is the preamble shown before injected RAG document chunks. The actual chunks are appended at runtime."
+                        : "Use {{county}} and {{serviceCategory}} as placeholders — they're replaced with the user's actual county and service area at runtime."}
+                    </div>
+                  )}
+
+                  {currentSpLayer && (
+                    <div style={{ fontSize: 11, color: "#9CA3AF", marginBottom: 10 }}>
+                      Last saved: {currentSpLayer.updatedAt ? new Date(currentSpLayer.updatedAt).toLocaleString() : "—"}
+                    </div>
+                  )}
+
+                  <textarea
+                    value={currentDraft}
+                    onChange={(e) => setSPDraft((d) => ({ ...d, [activeSpLayer]: e.target.value }))}
+                    style={{ width: "100%", minHeight: 280, border: "1px solid #D1D5DB", borderRadius: 6, padding: "12px 14px", fontSize: 13, color: "#111827", fontFamily: "monospace", lineHeight: 1.6, resize: "vertical", boxSizing: "border-box", outline: "none" }}
+                  />
+
+                  <div style={{ display: "flex", gap: 10, marginTop: 12, flexWrap: "wrap", alignItems: "center" }}>
+                    <button onClick={handleSPSave} disabled={!isDirty || showDiff} style={btnStyle("#1A2744", !isDirty || showDiff)}>Save changes</button>
+                    <button onClick={handleSPRevert} disabled={!currentSpLayer?.previousContent} style={btnStyle("#6B7280", !currentSpLayer?.previousContent)}>Revert to previous</button>
+                    {isDirty && <span style={{ fontSize: 12, color: "#F59E0B" }}>Unsaved changes</span>}
+                  </div>
+
+                  {/* Diff view */}
+                  {showDiff && pendingDiff && (
+                    <div style={{ marginTop: 20, border: "1px solid #E5E7EB", borderRadius: 8, overflow: "hidden" }}>
+                      <div style={{ padding: "12px 16px", background: "#F9FAFB", borderBottom: "1px solid #E5E7EB", fontSize: 13, fontWeight: 600, color: "#374151" }}>
+                        Review changes — {SP_LAYER_LABELS[pendingDiff.layer]}
+                      </div>
+                      <div style={{ overflowY: "auto", maxHeight: 400, fontFamily: "monospace", fontSize: 12 }}>
+                        {lineDiff(pendingDiff.old, pendingDiff.next).map((line, i) => (
+                          <div key={i} style={{ padding: "1px 16px", background: line.type === "added" ? "#DCFCE7" : line.type === "removed" ? "#FEE2E2" : "transparent", color: line.type === "added" ? "#166534" : line.type === "removed" ? "#991B1B" : "#374151", whiteSpace: "pre-wrap", wordBreak: "break-word", display: "flex", gap: 8 }}>
+                            <span style={{ opacity: 0.5, flexShrink: 0, userSelect: "none" }}>{line.type === "added" ? "+" : line.type === "removed" ? "−" : " "}</span>
+                            <span>{line.text || "\u00a0"}</span>
+                          </div>
                         ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-
-              {/* Upload new document */}
-              <div style={{ borderTop: "1px solid #E5E7EB", paddingTop: 20 }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 14 }}>Upload New Document</div>
-                <div style={{ display: "flex", flexWrap: "wrap", alignItems: "flex-end", gap: 12 }}>
-                  <div>
-                    <label style={labelStyle}>Document ID</label>
-                    <input
-                      type="text"
-                      value={uploadDocId}
-                      onChange={(e) => setUploadDocId(e.target.value)}
-                      placeholder="e.g. iqmeeteq-riceco"
-                      style={{ ...inputStyle(220), padding: "8px 12px" }}
-                    />
-                    <div style={hintStyle}>Unique identifier (auto-filled from filename)</div>
-                  </div>
-                  <div>
-                    <label style={labelStyle}>Markdown File (.md)</label>
-                    <input
-                      ref={uploadInputRef}
-                      type="file"
-                      accept=".md,.txt"
-                      onChange={(e) => {
-                        const f = e.target.files?.[0];
-                        if (!f) return;
-                        setUploadFile(f);
-                        if (!uploadDocId.trim()) {
-                          setUploadDocId(f.name.replace(/\.(md|txt)$/i, "").replace(/\s+/g, "-").toLowerCase());
-                        }
-                      }}
-                      style={{ display: "block", fontSize: 13, color: "#374151" }}
-                    />
-                  </div>
-                  <button
-                    onClick={handleUploadDoc}
-                    disabled={!uploadFile || !uploadDocId.trim() || !!corpusOp}
-                    style={btnStyle("#1A2744", !uploadFile || !uploadDocId.trim() || !!corpusOp)}
-                  >
-                    Upload &amp; Ingest
-                  </button>
-                </div>
-                {uploadFile && (
-                  <div style={{ marginTop: 8, fontSize: 13, color: "#6B7280" }}>
-                    Selected: <strong>{uploadFile.name}</strong> ({(uploadFile.size / 1024).toFixed(1)} KB)
-                  </div>
-                )}
-              </div>
-
-              {/* Hidden replace input */}
-              <input
-                ref={replaceInputRef}
-                type="file"
-                accept=".md,.txt"
-                style={{ display: "none" }}
-                onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (f) handleReplaceDoc(f);
-                  if (replaceInputRef.current) replaceInputRef.current.value = "";
-                }}
-              />
+                      </div>
+                      <div style={{ padding: "16px", background: "#F9FAFB", borderTop: "1px solid #E5E7EB" }}>
+                        <label style={{ fontSize: 13, fontWeight: 500, color: "#374151" }}>
+                          Type <code style={{ background: "#E5E7EB", padding: "1px 5px", borderRadius: 3 }}>confirm</code> to save:
+                        </label>
+                        <div style={{ display: "flex", gap: 10, marginTop: 10, flexWrap: "wrap" }}>
+                          <input type="text" value={confirmText} onChange={(e) => setConfirmText(e.target.value)} placeholder="confirm" style={{ ...inputStyle(150), padding: "8px 12px" }} />
+                          <button onClick={handleSPConfirmSave} disabled={confirmText !== "confirm" || spSaving} style={btnStyle("#1A2744", confirmText !== "confirm" || spSaving)}>{spSaving ? "Saving…" : "Save"}</button>
+                          <button onClick={() => { setShowDiff(false); setPendingDiff(null); setConfirmText(""); }} style={btnStyle("#6B7280")}>Cancel</button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
             </div>
           </>
         )}
-
       </main>
+
+      {/* View Modal */}
+      {viewModal && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
+          <div style={{ background: "#fff", borderRadius: 10, maxWidth: 800, width: "100%", maxHeight: "80vh", display: "flex", flexDirection: "column", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
+            <div style={{ padding: "16px 24px", borderBottom: "1px solid #E5E7EB", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span style={{ fontWeight: 600, fontSize: 15, color: "#111827" }}>{viewModal.title}</span>
+              <button onClick={() => setViewModal(null)} style={{ background: "none", border: "none", fontSize: 20, cursor: "pointer", color: "#6B7280", lineHeight: 1, padding: "0 4px" }}>×</button>
+            </div>
+            <pre style={{ flex: 1, overflowY: "auto", padding: "20px 24px", margin: 0, fontSize: 12, whiteSpace: "pre-wrap", wordBreak: "break-word", lineHeight: 1.6, color: "#374151" }}>
+              {viewModal.content || "(empty document)"}
+            </pre>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
-/* ── SHARED SUB-COMPONENTS ── */
 function StatCard({ title, value, sub }: { title: string; value: string | number; sub?: string }) {
-  return (
-    <div style={cardStyle}>
-      <div style={cardTitleStyle}>{title}</div>
-      <div style={bigNumStyle}>{value}</div>
-      {sub && <div style={subStyle}>{sub}</div>}
-    </div>
-  );
+  return <div style={cardStyle}><div style={cardTitleStyle}>{title}</div><div style={bigNumStyle}>{value}</div>{sub && <div style={subStyle}>{sub}</div>}</div>;
 }
 
 function ToggleSwitch({ enabled, onChange }: { enabled: boolean; onChange: (v: boolean) => void }) {
@@ -798,16 +724,13 @@ function ToggleSwitch({ enabled, onChange }: { enabled: boolean; onChange: (v: b
 }
 
 function Spinner({ size = 28, color = "#C8963E" }: { size?: number; color?: string }) {
-  return (
-    <div style={{ width: size, height: size, border: `3px solid ${color}`, borderTopColor: "transparent", borderRadius: "50%", animation: "spin 0.8s linear infinite", flexShrink: 0 }} />
-  );
+  return <div style={{ width: size, height: size, border: `3px solid ${color}`, borderTopColor: "transparent", borderRadius: "50%", animation: "spin 0.8s linear infinite", flexShrink: 0 }} />;
 }
 
 function GlobalStyles() {
   return <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>;
 }
 
-/* ── SHARED STYLES ── */
 const cardStyle: React.CSSProperties = { background: "#fff", borderRadius: 10, boxShadow: "0 1px 4px rgba(0,0,0,0.07)", padding: "20px 24px" };
 const cardTitleStyle: React.CSSProperties = { fontSize: 12, fontWeight: 600, color: "#6B7280", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 };
 const bigNumStyle: React.CSSProperties = { fontSize: 30, fontWeight: 700, color: "#111827", lineHeight: 1 };
@@ -817,5 +740,6 @@ const tblStyle: React.CSSProperties = { width: "100%", borderCollapse: "collapse
 const labelStyle: React.CSSProperties = { display: "block", fontSize: 13, fontWeight: 500, color: "#374151", marginBottom: 5 };
 const hintStyle: React.CSSProperties = { fontSize: 11, color: "#9CA3AF", marginTop: 4 };
 const selectStyle: React.CSSProperties = { border: "1px solid #D1D5DB", borderRadius: 6, padding: "7px 12px", fontSize: 13, color: "#111827", background: "#fff", cursor: "pointer" };
-function inputStyle(w: number): React.CSSProperties { return { width: w, border: "1px solid #D1D5DB", borderRadius: 6, padding: "7px 12px", fontSize: 13, color: "#111827" }; }
-function btnStyle(bg: string, disabled = false): React.CSSProperties { return { background: disabled ? "#9CA3AF" : bg, color: "#fff", border: "none", borderRadius: 6, padding: "8px 16px", fontSize: 13, fontWeight: 600, cursor: disabled ? "not-allowed" : "pointer", fontFamily: "'DM Sans', sans-serif" }; }
+function inputStyle(w: number | string): React.CSSProperties { return { width: w, border: "1px solid #D1D5DB", borderRadius: 6, padding: "7px 12px", fontSize: 13, color: "#111827" }; }
+function btnStyle(bg: string, disabled = false): React.CSSProperties { return { background: disabled ? "#9CA3AF" : bg, color: "#fff", border: "none", borderRadius: 6, padding: "8px 16px", fontSize: 13, fontWeight: 600, cursor: disabled ? "not-allowed" : "pointer", fontFamily: "'DM Sans', sans-serif", flexShrink: 0 }; }
+function smallBtn(color: string): React.CSSProperties { return { background: "none", border: `1px solid ${color}`, borderRadius: 5, padding: "4px 12px", fontSize: 12, cursor: "pointer", color, fontFamily: "'DM Sans', sans-serif" }; }

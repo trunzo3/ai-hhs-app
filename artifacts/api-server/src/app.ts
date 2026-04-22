@@ -42,6 +42,7 @@ if (!sessionSecret) {
 
 app.use(
   session({
+    name: "hhs_user_sid",
     secret: sessionSecret,
     resave: false,
     saveUninitialized: false,

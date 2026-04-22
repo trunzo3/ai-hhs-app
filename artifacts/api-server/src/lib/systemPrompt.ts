@@ -1,3 +1,20 @@
+import { db, systemPromptsTable } from "@workspace/db";
+import { logger } from "./logger";
+
+let _layersCache: Record<number, string> | null = null;
+
+export function invalidateSystemPromptCache(): void {
+  _layersCache = null;
+}
+
+export const LAYER_3_RAG_PREAMBLE = `REFERENCE MATERIAL (use this to inform your response — do not quote it directly or tell the user you're reading from a document):`;
+
+export const LAYER_4_USER_CONTEXT = `USER CONTEXT:
+- County: {{county}}
+- Service area: {{serviceCategory}}
+
+Use this to make examples relevant. If they're in CPS, use CPS examples. If they're in Eligibility, use benefits examples. Don't mention that you know this unless it's natural to do so.`;
+
 export const LAYER_1_IDENTITY = `You are an AI coaching assistant built by IQmeetEQ for California county Health and Human Services managers. Your job is to help users get real work done with AI — not to teach them theory.
 
 Tone: Direct, warm, practical. You sound like a knowledgeable colleague, not a consultant or a textbook. Use spoken language, not written language. If something sounds like a report, rewrite it in your head before saying it.
@@ -79,6 +96,68 @@ export function buildSystemPrompt(opts: {
   prompt += `\n\nAFTER EACH RESPONSE: End with a JSON block on its own line with this format (no preamble, just the JSON):
 {"followUps":["Option 1","Option 2"]}
 Pick 1-2 Power Follow-Ups that best fit the moment from the list. The user's chat interface will render these as tappable buttons. Do not explain the follow-ups inline — just put them in the JSON at the end.`;
+
+  return prompt;
+}
+
+async function ensureLayers(): Promise<Record<number, string>> {
+  if (_layersCache) return _layersCache;
+  const seeds = [
+    { layer: 1, content: LAYER_1_IDENTITY },
+    { layer: 2, content: LAYER_2_METHODOLOGY },
+    { layer: 3, content: LAYER_3_RAG_PREAMBLE },
+    { layer: 4, content: LAYER_4_USER_CONTEXT },
+  ];
+  try {
+    const existing = await db.select().from(systemPromptsTable);
+    const existingSet = new Set(existing.map((r) => r.layer));
+    for (const s of seeds) {
+      if (!existingSet.has(s.layer)) {
+        await db.insert(systemPromptsTable).values(s).onConflictDoNothing();
+      }
+    }
+    const allRows = existingSet.size >= 4 ? existing : await db.select().from(systemPromptsTable);
+    const cache: Record<number, string> = {};
+    for (const r of allRows) cache[r.layer] = r.content;
+    for (const s of seeds) if (!cache[s.layer]) cache[s.layer] = s.content;
+    _layersCache = cache;
+    return cache;
+  } catch (err) {
+    logger.error({ err }, "Failed to load system prompts from DB, using hardcoded fallback");
+    return { 1: LAYER_1_IDENTITY, 2: LAYER_2_METHODOLOGY, 3: LAYER_3_RAG_PREAMBLE, 4: LAYER_4_USER_CONTEXT };
+  }
+}
+
+export async function buildSystemPromptFromDB(opts: {
+  ragContext: string[];
+  county: string;
+  serviceCategory: string;
+  workingOutsideArea: boolean;
+  taskLauncher?: string | null;
+}): Promise<string> {
+  const { ragContext, county, serviceCategory, workingOutsideArea, taskLauncher } = opts;
+  const layers = await ensureLayers();
+
+  let prompt = `${layers[1]}\n\n${layers[2]}`;
+
+  if (ragContext.length > 0) {
+    prompt += `\n\n${layers[3]}\n\n${ragContext.join("\n\n---\n\n")}`;
+  }
+
+  if (!workingOutsideArea) {
+    const userCtx = (layers[4] ?? LAYER_4_USER_CONTEXT)
+      .replace(/\{\{county\}\}/g, county)
+      .replace(/\{\{serviceCategory\}\}/g, serviceCategory);
+    prompt += `\n\n${userCtx}`;
+  } else {
+    prompt += `\n\nUSER CONTEXT:\nThis user has indicated they are working outside their usual area. Respond generically without service-area-specific assumptions.`;
+  }
+
+  if (taskLauncher && TASK_CHAINS[taskLauncher]) {
+    prompt += `\n\nTASK CONTEXT: The user selected the task card "${taskLauncher}". ${TASK_CHAINS[taskLauncher]}`;
+  }
+
+  prompt += `\n\nAFTER EACH RESPONSE: End with a JSON block on its own line with this format (no preamble, just the JSON):\n{"followUps":["Option 1","Option 2"]}\nPick 1-2 Power Follow-Ups that best fit the moment from the list. The user's chat interface will render these as tappable buttons. Do not explain the follow-ups inline — just put them in the JSON at the end.`;
 
   return prompt;
 }

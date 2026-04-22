@@ -1,0 +1,51 @@
+**This is your prompt:**
+
+---
+
+Several changes across the app:
+
+**MODEL DROPDOWN FIX:**
+
+The model dropdown in the admin Settings tab shows "Claude Opus 4.5" which is wrong. Change the options to "Claude Opus 4.6" and "Claude Sonnet 4.6". The actual model strings passed to the Anthropic API must be "claude-opus-4-6" and "claude-sonnet-4-6" respectively. When the admin selects a model in this dropdown, that exact model string is what gets used in the API call for all new conversations. This is not just a display change — the selected value must control which model the backend sends to the Anthropic API.
+
+**SEPARATE ADMIN AND USER SESSIONS:**
+
+Admin and user sessions must use completely separate cookies. Logging out of the admin panel at /admin must not affect the user's chat session, and vice versa. The admin cookie should expire when the browser is closed (session cookie — no persistent expiration). The user cookie stays at 1-year expiration as currently set. This means a person can be logged into the chatbot as a user and logged into the admin panel simultaneously in the same browser without interference.
+
+**DISABLED USER LOGIN MESSAGE:**
+
+Add a "disabled" boolean field to the users table in the database, defaulting to false. When a disabled user tries to log in, reject the login and show this message: "Your account has been paused. If you think this is an error, reach out to anthony@iqmeeteq.com."
+
+**SETTINGS TAB LAYOUT:**
+
+Restructure the Settings tab in the admin dashboard. Order from top to bottom:
+
+1. Model Controls (already exists — just fix the model names as described above)
+2. Corpus Documents (new — described below)
+3. System Prompt (new — described below)
+
+**SYSTEM PROMPT EDITOR (Settings tab, below Corpus Documents):**
+
+Move the system prompt out of hardcoded source code and into the database. Pre-populate the database with the current hardcoded system prompt so nothing changes on first load. The app reads the system prompt from the database on every new conversation instead of from code.
+
+Build an editor in the Settings tab with:
+
+- A description line: "The system prompt controls how the chatbot behaves — its tone, coaching logic, data safety behavior, and how it uses your service area context. Changes take effect on the next new conversation."
+- Four sub-tabs for the four layers: "Layer 1: Identity & Tone", "Layer 2: Methodology", "Layer 3: RAG Context", "Layer 4: User Context". Clicking a tab shows that layer's text in the editor.
+- A text area showing the current content of the selected layer, fully editable.
+- A "Save changes" button and a "Revert to previous" button.
+- A "Last saved" timestamp showing when the prompt was last modified.
+- When the user clicks "Save changes", do NOT save immediately. Instead, show a diff view: the old text and the new text with removed lines highlighted in red and added lines highlighted in green. Below the diff, show a text input with the label "Type 'confirm' to save:" and a Save button (disabled until "confirm" is typed) and a Cancel button.
+- "Revert to previous" restores the last saved version of that layer (one level of undo, not a full version history).
+
+**CORPUS DOCUMENT MANAGEMENT (Settings tab, below Model Controls):**
+
+Build a corpus management section with:
+
+- A description line: "Documents in the RAG corpus inform the chatbot's responses. Upload markdown files to add knowledge — methodology frameworks, task chains, prompt libraries, and workflows."
+- An upload form with these fields: Title (text input, e.g. "RICECO Framework"), Description (text input, e.g. "Six-ingredient prompting model for structured prompts"), Category (dropdown: Methodology, Task Chain, Prompts, Workflows), File (file picker accepting .md and .txt files). An "Upload & ingest" button that uploads the file, chunks it, embeds the chunks, and stores them in pgvector.
+- A search bar that filters the document list by matching against title and description text.
+- A document list showing all corpus documents. Each row displays: title (bold), description (gray text below title), category (small badge), upload date, chunk count. Each row has three action buttons: View (shows the document content), Replace (upload a new version — deletes old chunks and re-ingests), Delete.
+- When the user clicks Delete, show an inline confirmation: "Delete [Document Title]? This removes the document and all its chunks from the chatbot's knowledge. This cannot be undone." Below that, a text input with the label "Type 'delete' to confirm:" and a Confirm button (disabled until "delete" is typed) and a Cancel button.
+
+---
