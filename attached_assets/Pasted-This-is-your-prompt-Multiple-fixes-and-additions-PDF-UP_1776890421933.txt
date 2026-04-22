@@ -1,0 +1,29 @@
+This is your prompt:
+
+Multiple fixes and additions:
+PDF UPLOAD FIX:
+PDF upload is still failing — the user sees "Unable to process this request. If you attached a file, try removing it and resending." Debug this by checking the server console logs when a PDF is uploaded. Print the full error to the console. The fix should encode the PDF as base64 and send it to the Anthropic API as a document content block in the messages array with media_type "application/pdf". Test with an actual PDF file and confirm the assistant responds with a breakdown of the document contents.
+WORD DOC UPLOAD FIX:
+Word doc upload (.docx) is also failing with the same error. The Anthropic API does not accept Word files natively. On the backend, when a .docx or .doc file is uploaded, extract the text content from the file (using a library like mammoth for .docx) and send the extracted text to Claude as a text message. The file picker should accept .pdf, .docx, and .doc files.
+MARKDOWN BULLET POINTS:
+The markdown renderer is handling bold text but not rendering bullet points or numbered lists properly. The list items appear without bullet markers or numbers. Fix the markdown rendering so that unordered lists show bullet points and ordered lists show numbers, with proper indentation and spacing.
+INPUT DURING GENERATION:
+Change the behavior while the assistant is generating a response: keep the input field enabled so the user can type, but disable the Enter key from sending a message. The send button transforms into a stop button (square icon). Clicking the stop button stops generation. When generation finishes or is stopped, Enter re-enables and the button reverts to the send arrow. This lets users type notes to themselves while waiting without accidentally sending a message.
+DOMAIN COLUMN IN FEEDBACK TABLE:
+Add a Domain column to the feedback table in the admin panel (the part of the email after the @). Make it sortable like the other columns.
+CORPUS UPLOAD UI CLEANUP:
+The "Choose File" button in the corpus upload form looks like plain text. Style it as a visible button with a border and background so it looks clickable. The selected file name currently shows in two places — next to the button and below the upload area. Show it in one place only: below the upload area with the file size.
+COPY BUTTON ON USER MESSAGES:
+Add a small copy icon to user messages (the navy bubbles on the right) so users can copy their own prompts. Same icon style as the copy button on assistant messages — a small gray icon that appears near the message.
+TRUST REMINDER:
+Add a persistent line of text visible at all times during chat. Position it as a subtle bar below the header or above the input area. Text: "AI for HHS never stores your conversations. When you close this chat, it's gone." Small font (12px), gray color, centered. Always visible, not dismissible.
+DASHBOARD BREAKDOWNS MISSING COUNTS:
+The Users by County and Users by Service Category breakdowns on the Dashboard tab are showing the names but no numbers. Fix the queries to count users per county and per service category, and display the count next to each name. Sort by count descending (highest first), matching the mockup format: "Fresno — 12".
+DASHBOARD TREND LINES:
+Add small sparkline charts (line charts, approximately 120px wide by 40px tall) below three of the summary cards on the Dashboard tab. Each shows the last 8-12 weeks of data as a simple line:
+
+Below the "Thumbs Up / Down" card: weekly thumbs-up percentage over time
+Below the "Weekly Active" card: weekly active user count over time
+Below the "Total Conversations" card: conversations per week over time
+
+Use a simple line chart — no axis labels, no grid lines, just the line in gold (#C8963E) on a white background. The sparkline should be small and subtle — a visual indicator of direction, not a full chart. If there isn't enough historical data yet, show a flat line or a "Not enough data yet" message.

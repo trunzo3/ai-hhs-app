@@ -324,6 +324,10 @@ export default function Chat() {
           <button onClick={logout} style={{ background: "none", border: "none", color: "#7B8CA3", fontSize: 13, cursor: "pointer", fontFamily: "'DM Sans', sans-serif", padding: "5px 0" }} data-testid="btn-logout">Log out</button>
         </div>
       </header>
+      {/* ── TRUST REMINDER ── */}
+      <div style={{ flexShrink: 0, background: "#F0F2F5", borderBottom: "1px solid #E2E5EA", padding: "5px 24px", textAlign: "center" }}>
+        <span style={{ fontSize: 12, color: "#6B7280", letterSpacing: "0.01em" }}>AI for HHS never stores your conversations. When you close this chat, it's gone.</span>
+      </div>
 
       {/* ── CHAT AREA ── */}
       <div style={{ flex: 1, overflowY: "auto", background: "#ECECEC", padding: "32px 16px" }} ref={scrollRef}>
@@ -340,7 +344,12 @@ export default function Chat() {
                     )}
                     <span style={{ whiteSpace: "pre-wrap" }}>{msg.content}</span>
                   </div>
-                  <div style={{ fontSize: 11, color: "#888888", marginTop: 4 }}>{msg.timestamp.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4 }}>
+                    <ActionBtn onClick={() => handleCopy(msg.content)} testId={`btn-copy-user-${idx}`} label="Copy">
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#888" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>
+                    </ActionBtn>
+                    <span style={{ fontSize: 11, color: "#888888" }}>{msg.timestamp.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
+                  </div>
                 </div>
               ) : (
                 <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
@@ -424,10 +433,9 @@ export default function Chat() {
               value={input}
               onChange={handleTextareaChange}
               onKeyDown={handleTextareaKeyDown}
-              disabled={isStreaming}
-              placeholder={isStreaming ? "Generating…" : "Ask anything or describe what you're working on…"}
+              placeholder="Ask anything or describe what you're working on…"
               rows={1}
-              style={{ flex: 1, background: isStreaming ? "#F9FAFB" : "#FFFFFF", border: "1.5px solid #999999", borderRadius: 18, padding: "11px 18px", fontSize: 14, color: "#1A2744", fontFamily: "'DM Sans', sans-serif", outline: "none", resize: "none", lineHeight: 1.5, overflowY: "hidden", maxHeight: 200, minHeight: 44 }}
+              style={{ flex: 1, background: "#FFFFFF", border: "1.5px solid #999999", borderRadius: 18, padding: "11px 18px", fontSize: 14, color: "#1A2744", fontFamily: "'DM Sans', sans-serif", outline: "none", resize: "none", lineHeight: 1.5, overflowY: "hidden", maxHeight: 200, minHeight: 44 }}
               data-testid="input-message"
             />
             {isStreaming ? (
@@ -441,7 +449,7 @@ export default function Chat() {
             )}
           </div>
           <div style={{ textAlign: "center", marginTop: 6 }}>
-            <span style={{ fontSize: 10, color: "#9CA3AF" }}>AI for HHS can make mistakes. Verify important information. {isStreaming ? "Shift+Enter for new line." : "Enter to send · Shift+Enter for new line."}</span>
+            <span style={{ fontSize: 10, color: "#9CA3AF" }}>AI for HHS can make mistakes. Verify important information. {isStreaming ? "Generating — Enter is paused · Shift+Enter for new line." : "Enter to send · Shift+Enter for new line."}</span>
           </div>
         </div>
       </div>

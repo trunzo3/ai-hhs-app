@@ -170,10 +170,20 @@ router.post("/chat/message", requireAuth, async (req, res): Promise<void> => {
     res.write(`data: ${JSON.stringify({ done: true, followUps })}\n\n`);
     res.end();
   } catch (err: any) {
+    console.error("[chat] Anthropic error:", {
+      status: err?.status,
+      message: err?.message,
+      error: err?.error,
+      headers: err?.headers,
+      hasPDF,
+      fileMediaType,
+    });
     req.log.error({ err }, "Error calling Anthropic API");
     let errorMessage = "Something went wrong. Please try again.";
     if (err?.status === 400 && err?.message?.includes("credit balance")) {
       errorMessage = "The AI service is temporarily unavailable due to account limits. Please contact the administrator.";
+    } else if (err?.status === 400 && hasPDF) {
+      errorMessage = "Unable to process this PDF. Try converting it to text and pasting the content instead.";
     } else if (err?.status === 400) {
       errorMessage = "Unable to process this request. If you attached a file, try removing it and resending.";
     } else if (err?.status === 529 || err?.status === 503) {

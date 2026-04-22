@@ -16,8 +16,11 @@ type AdminUser = {
   domainNote: string | null; disabled: boolean; createdAt: string; lastActive: string | null; conversationCount: number;
 };
 type AdminFeedback = {
-  id: string; userId: string; userEmail: string; feedbackType: string;
+  id: string; userId: string; userEmail: string; domain: string; feedbackType: string;
   detail: string | null; attemptedFileSize: number | null; createdAt: string;
+};
+type AdminTrends = {
+  weeklyActive: number[]; weeklyConversations: number[]; weeklyThumbsUpPct: (number | null)[];
 };
 type CorpusDocMeta = {
   docId: string; title: string; description: string; category: string;
@@ -123,10 +126,33 @@ export default function Admin() {
   return <AdminDashboard onLogout={handleLogout} />;
 }
 
+function Sparkline({ data, color = "#C8963E", width = 120, height = 40 }: { data: (number | null)[]; color?: string; width?: number; height?: number }) {
+  const nums = data.filter((v): v is number => v !== null && !isNaN(v));
+  if (nums.length < 2) return <div style={{ fontSize: 11, color: "#9CA3AF", height, lineHeight: `${height}px` }}>Not enough data yet</div>;
+  const min = Math.min(...nums), max = Math.max(...nums);
+  const range = max - min || 1;
+  const pts = data.reduce<{ x: number; y: number }[]>((acc, v, i) => {
+    if (v === null || isNaN(v)) return acc;
+    const x = (i / (data.length - 1)) * width;
+    const y = height - ((v - min) / range) * (height - 6) - 3;
+    acc.push({ x, y });
+    return acc;
+  }, []);
+  if (pts.length < 2) return <div style={{ fontSize: 11, color: "#9CA3AF" }}>Not enough data yet</div>;
+  const d = pts.map((p, i) => `${i === 0 ? "M" : "L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
+  return (
+    <svg width={width} height={height} style={{ display: "block", overflow: "visible" }}>
+      <path d={d} fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      <circle cx={pts[pts.length - 1].x} cy={pts[pts.length - 1].y} r="3" fill={color} />
+    </svg>
+  );
+}
+
 function AdminDashboard({ onLogout }: { onLogout: () => void }) {
   const [activeTab, setActiveTab] = useState<AdminTab>("dashboard");
 
   const [stats, setStats] = useState<AdminStats | null>(null);
+  const [trends, setTrends] = useState<AdminTrends | null>(null);
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [feedback, setFeedback] = useState<AdminFeedback[]>([]);
   const [loading, setLoading] = useState(true);
@@ -176,10 +202,11 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
   const fetchAll = useCallback(async () => {
     setLoading(true); setError(null);
     try {
-      const [sRes, uRes, fRes] = await Promise.all([fetch("/api/admin/stats"), fetch("/api/admin/users"), fetch("/api/admin/feedback")]);
+      const [sRes, uRes, fRes, tRes] = await Promise.all([fetch("/api/admin/stats"), fetch("/api/admin/users"), fetch("/api/admin/feedback"), fetch("/api/admin/trends")]);
       if (!sRes.ok || !uRes.ok || !fRes.ok) throw new Error("Fetch failed");
       const [sData, uData, fData] = await Promise.all([sRes.json(), uRes.json(), fRes.json()]);
       setStats(sData); setUsers(uData); setFeedback(fData); setThresholdInput(String(sData.spendThreshold));
+      if (tRes.ok) setTrends(await tRes.json());
     } catch { setError("Failed to load dashboard data. Please refresh."); }
     setLoading(false);
   }, []);
@@ -405,7 +432,12 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
             <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 16 }}>
               <StatCard title="Total Users" value={stats.totalUsers} />
               <StatCard title="New This Month" value={stats.newThisMonth} />
-              <StatCard title="Weekly Active" value={stats.weeklyActive} sub="unique users, last 7 days" />
+              <div style={cardStyle}>
+                <div style={cardTitleStyle}>Weekly Active</div>
+                <div style={bigNumStyle}>{stats.weeklyActive}</div>
+                <div style={subStyle}>unique users, last 7 days</div>
+                <div style={{ marginTop: 10 }}><Sparkline data={trends?.weeklyActive ?? []} /></div>
+              </div>
               <div style={{ background: "#FEF2F2", border: "1.5px solid #DC2626", borderRadius: 10, padding: "20px 24px" }}>
                 <div style={cardTitleStyle}>Unmatched Domains This Week</div>
                 <div style={{ fontSize: 30, fontWeight: 700, color: "#DC2626", lineHeight: 1 }}>{stats.unmatchedDomainsThisWeek}</div>
@@ -414,17 +446,46 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 16 }}>
               <div style={cardStyle}><div style={cardTitleStyle}>Returning vs. One-Time</div><div style={bigNumStyle}>{stats.returningUsers} <span style={{ fontSize: 16, color: "#6B7280", fontWeight: 400 }}>/ {stats.oneTimeUsers}</span></div><div style={subStyle}>returning / one-time</div></div>
-              <StatCard title="Total Conversations" value={stats.totalConversations} />
+              <div style={cardStyle}>
+                <div style={cardTitleStyle}>Total Conversations</div>
+                <div style={bigNumStyle}>{stats.totalConversations}</div>
+                <div style={{ marginTop: 10 }}><Sparkline data={trends?.weeklyConversations ?? []} /></div>
+              </div>
               <StatCard title="Avg Messages / Conversation" value={stats.avgMessagesPerConversation.toFixed(1)} />
-              <div style={cardStyle}><div style={cardTitleStyle}>Thumbs Up / Down</div><div style={bigNumStyle}>{upPct}%<span style={{ fontSize: 15, fontWeight: 400, color: "#6B7280" }}> up</span></div><div style={subStyle}>{stats.thumbsUpCount} up / {stats.thumbsDownCount} down</div></div>
+              <div style={cardStyle}>
+                <div style={cardTitleStyle}>Thumbs Up / Down</div>
+                <div style={bigNumStyle}>{upPct}%<span style={{ fontSize: 15, fontWeight: 400, color: "#6B7280" }}> up</span></div>
+                <div style={subStyle}>{stats.thumbsUpCount} up / {stats.thumbsDownCount} down</div>
+                <div style={{ marginTop: 10 }}><Sparkline data={trends?.weeklyThumbsUpPct ?? []} /></div>
+              </div>
             </div>
             <div style={{ ...cardStyle, display: "flex", alignItems: "center", gap: 32, flexWrap: "wrap" }}>
               <div><div style={cardTitleStyle}>Est. Cost This Month</div><div style={{ fontSize: 34, fontWeight: 700, color: "#111827" }}>${stats.currentMonthSpend.toFixed(2)}</div></div>
               <div style={{ color: "#9CA3AF", fontSize: 13 }}>{stats.currentMonthTokens.toLocaleString()} tokens</div>
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-              <div style={cardStyle}><div style={sectionTitleStyle}>Users by County</div><div style={{ overflowY: "auto", maxHeight: 300 }}><table style={tblStyle}><tbody>{stats.usersByCounty.map((c, i) => <tr key={i} style={{ borderBottom: "1px solid #F3F4F6" }}><td style={{ padding: "7px 0", fontSize: 13, color: "#374151" }}>{c.label}</td><td style={{ padding: "7px 0", fontSize: 13, fontWeight: 600, textAlign: "right" }}>{c.count}</td></tr>)}{stats.usersByCounty.length === 0 && <tr><td style={{ color: "#9CA3AF", fontSize: 13, padding: 8 }} colSpan={2}>No data yet</td></tr>}</tbody></table></div></div>
-              <div style={cardStyle}><div style={sectionTitleStyle}>Users by Service Category</div><div style={{ overflowY: "auto", maxHeight: 300 }}><table style={tblStyle}><tbody>{stats.usersByServiceCategory.map((c, i) => <tr key={i} style={{ borderBottom: "1px solid #F3F4F6" }}><td style={{ padding: "7px 0", fontSize: 13, color: "#374151" }}>{c.label}</td><td style={{ padding: "7px 0", fontSize: 13, fontWeight: 600, textAlign: "right" }}>{c.count}</td></tr>)}{stats.usersByServiceCategory.length === 0 && <tr><td style={{ color: "#9CA3AF", fontSize: 13, padding: 8 }} colSpan={2}>No data yet</td></tr>}</tbody></table></div></div>
+              <div style={cardStyle}>
+                <div style={sectionTitleStyle}>Users by County</div>
+                <div style={{ overflowY: "auto", maxHeight: 300 }}>
+                  {stats.usersByCounty.length === 0 ? <p style={{ color: "#9CA3AF", fontSize: 13, margin: 0 }}>No data yet</p> : stats.usersByCounty.map((c, i) => (
+                    <div key={i} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid #F3F4F6", fontSize: 13 }}>
+                      <span style={{ color: "#374151" }}>{c.label}</span>
+                      <span style={{ fontWeight: 700, color: "#1A2744", marginLeft: 12 }}>— {c.count}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div style={cardStyle}>
+                <div style={sectionTitleStyle}>Users by Service Category</div>
+                <div style={{ overflowY: "auto", maxHeight: 300 }}>
+                  {stats.usersByServiceCategory.length === 0 ? <p style={{ color: "#9CA3AF", fontSize: 13, margin: 0 }}>No data yet</p> : stats.usersByServiceCategory.map((c, i) => (
+                    <div key={i} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid #F3F4F6", fontSize: 13 }}>
+                      <span style={{ color: "#374151" }}>{c.label}</span>
+                      <span style={{ fontWeight: 700, color: "#1A2744", marginLeft: 12 }}>— {c.count}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
             </div>
             <div style={cardStyle}>
               <div style={sectionTitleStyle}>Task Launcher Ranking</div>
@@ -506,6 +567,7 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
                     {[
                       { label: "Date", field: "createdAt" },
                       { label: "User Email", field: "userEmail" },
+                      { label: "Domain", field: "domain" },
                       { label: "Type", field: "feedbackType" },
                       { label: "What They Were Trying To Do / Feedback", field: "detail" },
                       { label: "File Size", field: "attemptedFileSize" },
@@ -523,7 +585,8 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
                   {sortedFeedback.map((f) => (
                     <tr key={f.id}>
                       <TD style={{ whiteSpace: "nowrap" }}>{fmt(f.createdAt)}</TD>
-                      <TD style={{ maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.userEmail}</TD>
+                      <TD style={{ maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.userEmail}</TD>
+                      <TD><span style={{ fontFamily: "monospace", fontSize: 12 }}>{f.domain || "—"}</span></TD>
                       <TD>
                         <span style={{ background: f.feedbackType === "user_feedback" ? "#EDE9FE" : "#FEF3C7", color: f.feedbackType === "user_feedback" ? "#5B21B6" : "#92400E", fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 10, whiteSpace: "nowrap" }}>
                           {f.feedbackType.replace(/_/g, " ")}
@@ -533,7 +596,7 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
                       <TD style={{ whiteSpace: "nowrap" }}>{f.feedbackType === "user_feedback" ? "—" : f.attemptedFileSize ? `${(f.attemptedFileSize / 1024 / 1024).toFixed(1)} MB` : "—"}</TD>
                     </tr>
                   ))}
-                  {feedback.length === 0 && <tr><td colSpan={5} style={{ padding: 20, textAlign: "center", color: "#9CA3AF", fontSize: 13 }}>No feedback entries yet</td></tr>}
+                  {feedback.length === 0 && <tr><td colSpan={6} style={{ padding: 20, textAlign: "center", color: "#9CA3AF", fontSize: 13 }}>No feedback entries yet</td></tr>}
                 </tbody>
               </table>
             </div>
@@ -589,11 +652,12 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
                   </div>
                   <div>
                     <label style={labelStyle}>File (.md or .txt)</label>
-                    <input ref={uploadInputRef} type="file" accept=".md,.txt" onChange={(e) => { const f = e.target.files?.[0]; if (!f) return; setUploadFile(f); if (!uploadDocId) setUploadDocId(f.name.replace(/\.(md|txt)$/i, "").replace(/\s+/g, "-").toLowerCase()); }} style={{ display: "block", fontSize: 13, color: "#374151" }} />
+                    <input ref={uploadInputRef} type="file" accept=".md,.txt" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; if (!f) return; setUploadFile(f); if (!uploadDocId) setUploadDocId(f.name.replace(/\.(md|txt)$/i, "").replace(/\s+/g, "-").toLowerCase()); }} />
+                    <button type="button" onClick={() => uploadInputRef.current?.click()} style={{ border: "1px solid #D1D5DB", borderRadius: 6, padding: "7px 14px", fontSize: 13, background: "#fff", color: "#374151", cursor: "pointer", fontFamily: "'DM Sans', sans-serif" }}>Choose File</button>
                   </div>
                   <button onClick={handleUploadDoc} disabled={!uploadFile || !uploadTitle.trim() || !!corpusOp} style={btnStyle("#1A2744", !uploadFile || !uploadTitle.trim() || !!corpusOp)}>Upload &amp; Ingest</button>
                 </div>
-                {uploadFile && <div style={{ marginTop: 8, fontSize: 12, color: "#6B7280" }}>Selected: <strong>{uploadFile.name}</strong> ({(uploadFile.size / 1024).toFixed(1)} KB)</div>}
+                {uploadFile && <div style={{ marginTop: 10, fontSize: 12, color: "#6B7280" }}><strong>{uploadFile.name}</strong> · {(uploadFile.size / 1024).toFixed(1)} KB</div>}
               </div>
 
               {/* Search */}

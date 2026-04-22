@@ -30,8 +30,8 @@ router.get("/admin/stats", requireAdmin, async (req, res): Promise<void> => {
     const [{ weeklyActive }] = await db.select({ weeklyActive: sql<number>`COUNT(DISTINCT ${conversationMetadataTable.userId})::int` }).from(conversationMetadataTable).where(sql`${conversationMetadataTable.startedAt} >= ${weekAgo}`);
     const [{ unmatchedDomainsThisWeek }] = await db.select({ unmatchedDomainsThisWeek: count() }).from(usersTable).where(and(eq(usersTable.domainMatch, false), sql`${usersTable.createdAt} >= ${weekAgo}`));
 
-    const usersByCounty = await db.select({ label: usersTable.county, count: count() }).from(usersTable).groupBy(usersTable.county).orderBy(desc(count()));
-    const usersByServiceCategory = await db.select({ label: usersTable.serviceCategory, count: count() }).from(usersTable).groupBy(usersTable.serviceCategory).orderBy(desc(count()));
+    const usersByCounty = await db.select({ label: usersTable.county, count: sql<number>`COUNT(*)::int` }).from(usersTable).groupBy(usersTable.county).orderBy(sql`COUNT(*) DESC`);
+    const usersByServiceCategory = await db.select({ label: usersTable.serviceCategory, count: sql<number>`COUNT(*)::int` }).from(usersTable).groupBy(usersTable.serviceCategory).orderBy(sql`COUNT(*) DESC`);
     const [{ unmatchedDomainCount }] = await db.select({ unmatchedDomainCount: count() }).from(usersTable).where(eq(usersTable.domainMatch, false));
     const [{ totalConversations }] = await db.select({ totalConversations: count() }).from(conversationMetadataTable);
     const [{ avgMessages }] = await db.select({ avgMessages: avg(conversationMetadataTable.messageCount) }).from(conversationMetadataTable);
@@ -98,7 +98,11 @@ router.get("/admin/feedback", requireAdmin, async (req, res): Promise<void> => {
       feedbackType: feedbackTable.feedbackType, detail: feedbackTable.detail,
       attemptedFileSize: feedbackTable.attemptedFileSize, createdAt: feedbackTable.createdAt,
     }).from(feedbackTable).leftJoin(usersTable, eq(feedbackTable.userId, usersTable.id)).orderBy(desc(feedbackTable.createdAt)).limit(200);
-    res.json(entries.map((e) => ({ ...e, userEmail: e.userEmail ?? "unknown", detail: e.detail ?? null, attemptedFileSize: e.attemptedFileSize ?? null, createdAt: e.createdAt.toISOString() })));
+    res.json(entries.map((e) => {
+      const email = e.userEmail ?? "unknown";
+      const domain = email.includes("@") ? email.split("@")[1] : "—";
+      return { ...e, userEmail: email, domain, detail: e.detail ?? null, attemptedFileSize: e.attemptedFileSize ?? null, createdAt: e.createdAt.toISOString() };
+    }));
   } catch (err) {
     req.log.error({ err }, "Failed to fetch admin feedback");
     res.status(500).json({ error: "Failed to fetch feedback" });
@@ -264,6 +268,47 @@ router.patch("/admin/config", requireAdmin, async (req, res): Promise<void> => {
   const updatedThreshold = await getSpendThreshold();
   const { spend, tokens } = await getCurrentMonthSpend();
   res.json({ activeModel: updatedModel, spendThreshold: updatedThreshold, currentMonthSpend: spend, currentMonthTokens: tokens });
+});
+
+router.get("/admin/trends", requireAdmin, async (req, res): Promise<void> => {
+  try {
+    const NUM_WEEKS = 10;
+    const weeklyActive: number[] = [];
+    const weeklyConversations: number[] = [];
+    const weeklyThumbsUpPct: (number | null)[] = [];
+
+    for (let i = NUM_WEEKS - 1; i >= 0; i--) {
+      const weekEnd = new Date();
+      weekEnd.setDate(weekEnd.getDate() - i * 7);
+      const weekStart = new Date(weekEnd);
+      weekStart.setDate(weekStart.getDate() - 7);
+
+      const [{ active }] = await db.select({ active: sql<number>`COUNT(DISTINCT ${conversationMetadataTable.userId})::int` })
+        .from(conversationMetadataTable)
+        .where(and(sql`${conversationMetadataTable.startedAt} >= ${weekStart}`, sql`${conversationMetadataTable.startedAt} < ${weekEnd}`));
+
+      const [{ convos }] = await db.select({ convos: sql<number>`COUNT(*)::int` })
+        .from(conversationMetadataTable)
+        .where(and(sql`${conversationMetadataTable.startedAt} >= ${weekStart}`, sql`${conversationMetadataTable.startedAt} < ${weekEnd}`));
+
+      const [{ ups }] = await db.select({ ups: sql<number>`COUNT(*)::int` })
+        .from(responseRatingsTable)
+        .where(and(eq(responseRatingsTable.rating, "up"), sql`${responseRatingsTable.createdAt} >= ${weekStart}`, sql`${responseRatingsTable.createdAt} < ${weekEnd}`));
+
+      const [{ total }] = await db.select({ total: sql<number>`COUNT(*)::int` })
+        .from(responseRatingsTable)
+        .where(and(sql`${responseRatingsTable.createdAt} >= ${weekStart}`, sql`${responseRatingsTable.createdAt} < ${weekEnd}`));
+
+      weeklyActive.push(active ?? 0);
+      weeklyConversations.push(convos ?? 0);
+      weeklyThumbsUpPct.push(total > 0 ? Math.round(((ups ?? 0) / total) * 100) : null);
+    }
+
+    res.json({ weeklyActive, weeklyConversations, weeklyThumbsUpPct });
+  } catch (err) {
+    req.log.error({ err }, "Failed to fetch trends");
+    res.status(500).json({ error: "Failed to fetch trends" });
+  }
 });
 
 export default router;
