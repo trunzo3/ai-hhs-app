@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { spawn } from "child_process";
-import { db, usersTable, conversationMetadataTable, responseRatingsTable, feedbackTable, appConfigTable, tokenUsageTable, corpusDocumentsTable, systemPromptsTable } from "@workspace/db";
+import { db, usersTable, conversationMetadataTable, responseRatingsTable, feedbackTable, inquiriesTable, appConfigTable, tokenUsageTable, corpusDocumentsTable, systemPromptsTable } from "@workspace/db";
 import { eq, count, avg, desc, and } from "drizzle-orm";
 import { sql } from "drizzle-orm";
 import { getActiveModel, getSpendThreshold, getCurrentMonthSpend } from "../../lib/tokenTracker";
@@ -107,6 +107,19 @@ router.get("/admin/feedback", requireAdmin, async (req, res): Promise<void> => {
   } catch (err) {
     req.log.error({ err }, "Failed to fetch admin feedback");
     res.status(500).json({ error: "Failed to fetch feedback" });
+  }
+});
+
+router.get("/admin/inquiries", requireAdmin, async (req, res): Promise<void> => {
+  try {
+    const entries = await db.select().from(inquiriesTable).orderBy(desc(inquiriesTable.createdAt)).limit(500);
+    res.json(entries.map((e) => {
+      const domain = e.userEmail.includes("@") ? e.userEmail.split("@")[1] : "—";
+      return { ...e, domain, createdAt: e.createdAt.toISOString() };
+    }));
+  } catch (err) {
+    req.log.error({ err }, "Failed to fetch admin inquiries");
+    res.status(500).json({ error: "Failed to fetch inquiries" });
   }
 });
 

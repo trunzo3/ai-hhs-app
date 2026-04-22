@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useLocation } from "wouter";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -68,9 +68,11 @@ export default function Chat() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
 
-  const [showFeedbackModal, setShowFeedbackModal] = useState(false);
-  const [feedbackText, setFeedbackText] = useState("");
-  const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
+  const [showGetInTouchModal, setShowGetInTouchModal] = useState(false);
+  const [gitInquiryType, setGitInquiryType] = useState("");
+  const [gitMessage, setGitMessage] = useState("");
+  const [gitEmail, setGitEmail] = useState("");
+  const [gitSubmitting, setGitSubmitting] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -87,6 +89,10 @@ export default function Chat() {
   useEffect(() => {
     if (!isUserLoading && userError) setLocation("/");
   }, [isUserLoading, userError, setLocation]);
+
+  useEffect(() => {
+    if (user?.email && !gitEmail) setGitEmail(user.email);
+  }, [user]);
 
   useEffect(() => {
     if (user && !conversationId && !startConvMutation.isPending) handleNewChat();
@@ -257,17 +263,26 @@ export default function Chat() {
     });
   };
 
-  const handleSubmitFeedback = () => {
-    if (!feedbackText.trim()) return;
-    setFeedbackSubmitting(true);
-    feedbackMutation.mutate({ data: { feedbackType: "user_feedback", detail: feedbackText.trim() } }, {
-      onSuccess: () => {
-        setShowFeedbackModal(false);
-        setFeedbackText("");
-        toast({ title: "Feedback submitted", description: "Thank you!" });
-      },
-      onSettled: () => setFeedbackSubmitting(false),
-    });
+  const handleSubmitInquiry = async () => {
+    if (!gitInquiryType || !gitMessage.trim() || !gitEmail.trim()) return;
+    setGitSubmitting(true);
+    try {
+      const res = await fetch("/api/inquiries", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ inquiryType: gitInquiryType, message: gitMessage.trim(), preferredEmail: gitEmail.trim() }),
+      });
+      if (!res.ok) throw new Error("Submit failed");
+      setShowGetInTouchModal(false);
+      setGitInquiryType("");
+      setGitMessage("");
+      setGitEmail(user?.email ?? "");
+      toast({ title: "Message sent", description: "Thanks — I'll be in touch soon." });
+    } catch {
+      toast({ variant: "destructive", title: "Couldn't send", description: "Please try again." });
+    } finally {
+      setGitSubmitting(false);
+    }
   };
 
   const logout = async () => {
@@ -326,10 +341,12 @@ export default function Chat() {
 
       {/* ── HEADER ── */}
       <header style={{ flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 24px", height: 52, background: "#1A2744", borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
-        <h1 style={{ fontFamily: "'DM Serif Display', serif", fontSize: 20, fontWeight: 700, color: "#C8963E", margin: 0 }}>AI for HHS</h1>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <button onClick={() => setShowFeedbackModal(true)} style={{ background: "transparent", border: "none", color: "#7B8CA3", fontSize: 13, cursor: "pointer", fontFamily: "'DM Sans', sans-serif", padding: "5px 0" }} data-testid="btn-feedback-link">Feedback</button>
+        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+          <h1 style={{ fontFamily: "'DM Serif Display', serif", fontSize: 20, fontWeight: 700, color: "#C8963E", margin: 0 }}>AI for HHS</h1>
           <button onClick={handleNewChat} style={{ background: "transparent", border: "1px solid #C8963E", color: "#C8963E", borderRadius: 6, fontSize: 13, padding: "5px 14px", cursor: "pointer", fontFamily: "'DM Sans', sans-serif" }} data-testid="btn-new-chat">New chat</button>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+          <button onClick={() => { setGitEmail(user?.email ?? ""); setShowGetInTouchModal(true); }} style={{ background: "transparent", border: "none", color: "#7B8CA3", fontSize: 13, cursor: "pointer", fontFamily: "'DM Sans', sans-serif", padding: "5px 0" }} data-testid="btn-get-in-touch">Get in touch</button>
           <button onClick={logout} style={{ background: "none", border: "none", color: "#7B8CA3", fontSize: 13, cursor: "pointer", fontFamily: "'DM Sans', sans-serif", padding: "5px 0" }} data-testid="btn-logout">Log out</button>
         </div>
       </header>
@@ -465,23 +482,57 @@ export default function Chat() {
         </div>
       </div>
 
-      {/* ── FEEDBACK MODAL ── */}
-      {showFeedbackModal && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }} onClick={(e) => { if (e.target === e.currentTarget) setShowFeedbackModal(false); }}>
-          <div style={{ background: "#fff", borderRadius: 12, maxWidth: 480, width: "100%", padding: "28px 28px 24px", boxShadow: "0 16px 48px rgba(0,0,0,0.2)", fontFamily: "'DM Sans', sans-serif" }}>
-            <h2 style={{ fontFamily: "'DM Serif Display', serif", fontSize: 20, color: "#1A2744", margin: "0 0 6px" }}>Share Feedback</h2>
-            <p style={{ fontSize: 13, color: "#6B7280", margin: "0 0 18px", lineHeight: 1.5 }}>What's working? What's not? What do you wish this tool could do?</p>
-            <textarea
-              value={feedbackText}
-              onChange={(e) => setFeedbackText(e.target.value)}
-              placeholder="What's working? What's not? What do you wish this tool could do?"
-              rows={4}
-              style={{ width: "100%", border: "1.5px solid #D1D5DB", borderRadius: 8, padding: "10px 14px", fontSize: 14, fontFamily: "'DM Sans', sans-serif", color: "#111827", resize: "vertical", outline: "none", boxSizing: "border-box", lineHeight: 1.5 }}
-            />
-            <div style={{ display: "flex", gap: 10, marginTop: 16, justifyContent: "flex-end" }}>
-              <button onClick={() => { setShowFeedbackModal(false); setFeedbackText(""); }} style={{ background: "none", border: "1px solid #D1D5DB", borderRadius: 6, padding: "8px 18px", fontSize: 13, cursor: "pointer", color: "#374151", fontFamily: "'DM Sans', sans-serif" }}>Cancel</button>
-              <button onClick={handleSubmitFeedback} disabled={!feedbackText.trim() || feedbackSubmitting} style={{ background: feedbackText.trim() && !feedbackSubmitting ? "#1A2744" : "#9CA3AF", border: "none", borderRadius: 6, padding: "8px 20px", fontSize: 13, fontWeight: 600, cursor: feedbackText.trim() && !feedbackSubmitting ? "pointer" : "not-allowed", color: "#fff", fontFamily: "'DM Sans', sans-serif" }}>
-                {feedbackSubmitting ? "Submitting…" : "Submit"}
+      {/* ── GET IN TOUCH MODAL ── */}
+      {showGetInTouchModal && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }} onClick={(e) => { if (e.target === e.currentTarget) setShowGetInTouchModal(false); }}>
+          <div style={{ background: "#fff", borderRadius: 12, maxWidth: 500, width: "100%", padding: "28px 28px 24px", boxShadow: "0 16px 48px rgba(0,0,0,0.2)", fontFamily: "'DM Sans', sans-serif" }}>
+            <h2 style={{ fontFamily: "'DM Serif Display', serif", fontSize: 22, color: "#1A2744", margin: "0 0 8px" }}>Get in touch</h2>
+            <p style={{ fontSize: 13, color: "#6B7280", margin: "0 0 22px", lineHeight: 1.6 }}>Whether you want training for your team, help with a project, or want to share feedback about the tool — I'd love to hear from you.</p>
+
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ display: "block", fontSize: 13, fontWeight: 500, color: "#374151", marginBottom: 5 }}>What are you interested in?</label>
+              <select
+                value={gitInquiryType}
+                onChange={(e) => setGitInquiryType(e.target.value)}
+                style={{ width: "100%", border: "1.5px solid #D1D5DB", borderRadius: 8, padding: "9px 12px", fontSize: 14, color: gitInquiryType ? "#111827" : "#9CA3AF", fontFamily: "'DM Sans', sans-serif", background: "#fff", outline: "none", boxSizing: "border-box" }}
+              >
+                <option value="" disabled>Select an option…</option>
+                <option value="AI training for my team">AI training for my team</option>
+                <option value="Help with a specific project">Help with a specific project</option>
+                <option value="Share feedback about the tool">Share feedback about the tool</option>
+                <option value="Something else">Something else</option>
+              </select>
+            </div>
+
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ display: "block", fontSize: 13, fontWeight: 500, color: "#374151", marginBottom: 5 }}>Tell me more</label>
+              <textarea
+                value={gitMessage}
+                onChange={(e) => setGitMessage(e.target.value)}
+                placeholder="What are you working on, and how can I help?"
+                rows={4}
+                style={{ width: "100%", border: "1.5px solid #D1D5DB", borderRadius: 8, padding: "10px 14px", fontSize: 14, fontFamily: "'DM Sans', sans-serif", color: "#111827", resize: "vertical", outline: "none", boxSizing: "border-box", lineHeight: 1.5 }}
+              />
+            </div>
+
+            <div style={{ marginBottom: 22 }}>
+              <label style={{ display: "block", fontSize: 13, fontWeight: 500, color: "#374151", marginBottom: 5 }}>Best email to reach you</label>
+              <input
+                type="email"
+                value={gitEmail}
+                onChange={(e) => setGitEmail(e.target.value)}
+                style={{ width: "100%", border: "1.5px solid #D1D5DB", borderRadius: 8, padding: "9px 14px", fontSize: 14, fontFamily: "'DM Sans', sans-serif", color: "#111827", outline: "none", boxSizing: "border-box" }}
+              />
+            </div>
+
+            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+              <button onClick={() => setShowGetInTouchModal(false)} style={{ background: "none", border: "1px solid #D1D5DB", borderRadius: 6, padding: "8px 18px", fontSize: 13, cursor: "pointer", color: "#374151", fontFamily: "'DM Sans', sans-serif" }}>Cancel</button>
+              <button
+                onClick={handleSubmitInquiry}
+                disabled={!gitInquiryType || !gitMessage.trim() || !gitEmail.trim() || gitSubmitting}
+                style={{ background: (!gitInquiryType || !gitMessage.trim() || !gitEmail.trim() || gitSubmitting) ? "#D4A56A" : "#C8963E", border: "none", borderRadius: 6, padding: "8px 22px", fontSize: 13, fontWeight: 600, cursor: (!gitInquiryType || !gitMessage.trim() || !gitEmail.trim() || gitSubmitting) ? "not-allowed" : "pointer", color: "#fff", fontFamily: "'DM Sans', sans-serif" }}
+              >
+                {gitSubmitting ? "Sending…" : "Send message"}
               </button>
             </div>
           </div>

@@ -1,0 +1,65 @@
+**This is your prompt:**
+
+---
+
+Several changes to the chat interface and admin panel:
+
+**CHAT HEADER REDESIGN:**
+
+Rearrange the chat interface header. Left side: "AI for HHS" wordmark in gold, then "New chat" button (gold border, gold text). Right side: "Get in touch" as a text link (gray #7B8CA3), then "Log out" as a text link (gray #7B8CA3). Remove the Feedback link — it's being replaced by "Get in touch."
+
+**GET IN TOUCH MODAL:**
+
+When a user clicks "Get in touch" in the header, open a modal overlay on top of the chat (conversation stays visible behind it, dimmed background). The modal contains:
+
+- Title: "Get in touch" in DM Serif Display
+- Description: "Whether you want training for your team, help with a project, or want to share feedback about the tool — I'd love to hear from you."
+- Dropdown field labeled "What are you interested in?" with options: "AI training for my team", "Help with a specific project", "Share feedback about the tool", "Something else"
+- Text area labeled "Tell me more" (3-4 lines, placeholder: "What are you working on, and how can I help?")
+- Email field labeled "Best email to reach you" — pre-filled with their registration email, editable
+- Submit button (gold #C8963E background, white text) and Cancel button (gray border)
+- Cancel closes the modal. Submit saves the entry to the database with the dropdown selection, message text, and preferred email, then closes the modal.
+
+**FOOTER ATTRIBUTION:**
+
+Add a small text line at the bottom of the login/registration page: "Built by IQmeetEQ" — linked to headandheartca.com. Small font (12px), gray, centered. Not prominent.
+
+**ADMIN ACCESS REDESIGN:**
+
+Remove the separate admin login page and any separate admin cookie/session logic. Add a small subtle gear icon on the main login/registration page — bottom right corner, small, gray, barely visible. Clicking the gear navigates to /admin where the admin login form appears. When an admin logs out of the admin panel, they are taken back to the main user-facing landing/registration page. Clean up any dead code from the old separate admin session approach.
+
+**ADMIN TAB RESTRUCTURE:**
+
+Rename the "Feedback" tab to "Inbox" and move it to the first position. Tab order becomes: Inbox, Dashboard, Users, Settings. When an admin logs in, the Inbox tab is what they see first.
+
+**INBOX TAB — INQUIRIES TABLE:**
+
+Replace the current feedback table with two separate sections:
+
+Top section — "Inquiries" with subtitle "Get in Touch submissions" and a total count.
+
+Each inquiry uses a compact two-row layout instead of a wide single row:
+
+Row 1: Date — Type (compact badge) — Email — Domain. These four columns are sortable by clicking the column header.
+
+Row 2: The message text, spanning the full width underneath row 1, indented to align with the Type column. Displayed in gray (#6B7280), 13px. If the user entered a different preferred email than their registration email, show it below the message in gold (#C8963E) text: "Preferred email: [email]". If the preferred email matches their registration email, show nothing.
+
+Badge labels and colors — these reflect priority, not just category:
+- "Training" — dark green badge (background #DCFCE7, text #166534). For "AI training for my team" submissions.
+- "Project" — dark green badge (same colors as Training). For "Help with a specific project" submissions.
+- "Other" — amber badge (background #FAEEDA, text #633806). For "Something else" submissions.
+- "Feedback" — gray badge (background #F1EFE8, text #5F5E5A). For "Share feedback about the tool" submissions.
+
+Bottom section — "Upload issues" with subtitle "Attempted file uploads that exceeded the size limit" and a total count.
+
+Standard table layout with sortable columns: Date, Email, Domain, What they were trying to do, File Size. This table only contains entries from the "This got in my way" button when a file upload exceeds the size limit.
+
+**THINKING DOTS:**
+
+The animated thinking indicator (5 dots that pulse while the assistant is generating) was previously requested but is not appearing. Please implement it: show 5 animated dots below the last message while the assistant is generating a response. Each dot should be 8-10px, dark gray (#444444), with a pulsing or bouncing animation. The dots disappear when the response text starts streaming.
+
+**TASK LAUNCHER RANKING FIX:**
+
+The task launcher ranking on the admin Dashboard tab is showing bars but no count numbers. Display the tap count as a number to the right of each bar. Reduce the maximum bar width to about 200px so bars don't dominate the page. The highest count gets the full 200px bar, all others scale proportionally.
+
+---

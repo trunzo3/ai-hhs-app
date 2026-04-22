@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { setAdminAuthenticated } from "@/lib/adminAuth";
 
-type AdminTab = "dashboard" | "users" | "feedback" | "settings";
+type AdminTab = "inbox" | "dashboard" | "users" | "settings";
 
 type AdminStats = {
   totalUsers: number; newThisMonth: number; weeklyActive: number; unmatchedDomainsThisWeek: number;
@@ -18,6 +18,10 @@ type AdminUser = {
 type AdminFeedback = {
   id: string; userId: string; userEmail: string; domain: string; feedbackType: string;
   detail: string | null; attemptedFileSize: number | null; createdAt: string;
+};
+type AdminInquiry = {
+  id: string; userId: string; userEmail: string; domain: string;
+  inquiryType: string; message: string; preferredEmail: string; createdAt: string;
 };
 type AdminTrends = {
   weeklyActive: number[]; weeklyConversations: number[]; weeklyThumbsUpPct: (number | null)[];
@@ -149,12 +153,13 @@ function Sparkline({ data, color = "#C8963E", width = 120, height = 40 }: { data
 }
 
 function AdminDashboard({ onLogout }: { onLogout: () => void }) {
-  const [activeTab, setActiveTab] = useState<AdminTab>("dashboard");
+  const [activeTab, setActiveTab] = useState<AdminTab>("inbox");
 
   const [stats, setStats] = useState<AdminStats | null>(null);
   const [trends, setTrends] = useState<AdminTrends | null>(null);
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [feedback, setFeedback] = useState<AdminFeedback[]>([]);
+  const [inquiries, setInquiries] = useState<AdminInquiry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -165,6 +170,8 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [feedbackSortField, setFeedbackSortField] = useState("createdAt");
   const [feedbackSortDir, setFeedbackSortDir] = useState<"asc" | "desc">("desc");
+  const [inquirySortField, setInquirySortField] = useState("createdAt");
+  const [inquirySortDir, setInquirySortDir] = useState<"asc" | "desc">("desc");
   const [thresholdInput, setThresholdInput] = useState("");
   const [savingConfig, setSavingConfig] = useState(false);
   const [backupLoading, setBackupLoading] = useState(false);
@@ -204,11 +211,18 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
   const fetchAll = useCallback(async () => {
     setLoading(true); setError(null);
     try {
-      const [sRes, uRes, fRes, tRes] = await Promise.all([fetch("/api/admin/stats"), fetch("/api/admin/users"), fetch("/api/admin/feedback"), fetch("/api/admin/trends")]);
+      const [sRes, uRes, fRes, tRes, iRes] = await Promise.all([
+        fetch("/api/admin/stats"),
+        fetch("/api/admin/users"),
+        fetch("/api/admin/feedback"),
+        fetch("/api/admin/trends"),
+        fetch("/api/admin/inquiries"),
+      ]);
       if (!sRes.ok || !uRes.ok || !fRes.ok) throw new Error("Fetch failed");
       const [sData, uData, fData] = await Promise.all([sRes.json(), uRes.json(), fRes.json()]);
       setStats(sData); setUsers(uData); setFeedback(fData); setThresholdInput(String(sData.spendThreshold));
       if (tRes.ok) setTrends(await tRes.json());
+      if (iRes.ok) setInquiries(await iRes.json());
     } catch { setError("Failed to load dashboard data. Please refresh."); }
     setLoading(false);
   }, []);
@@ -391,6 +405,19 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
     return 0;
   });
 
+  const handleInquirySort = (field: string) => {
+    if (inquirySortField === field) setInquirySortDir((d) => d === "asc" ? "desc" : "asc");
+    else { setInquirySortField(field); setInquirySortDir("asc"); }
+  };
+  const sortedInquiries = [...inquiries].sort((a: any, b: any) => {
+    let av = a[inquirySortField], bv = b[inquirySortField];
+    if (av == null) av = ""; if (bv == null) bv = "";
+    if (av < bv) return inquirySortDir === "asc" ? -1 : 1;
+    if (av > bv) return inquirySortDir === "asc" ? 1 : -1;
+    return 0;
+  });
+  const uploadIssues = sortedFeedback.filter((f) => f.feedbackType === "file_upload_error");
+
   const counties = [...new Set(users.map((u) => u.county))].sort();
   const categories = [...new Set(users.map((u) => u.serviceCategory))].sort();
   const filteredUsers = users.filter((u) => {
@@ -424,7 +451,7 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
   const totalRatings = stats.thumbsUpCount + stats.thumbsDownCount;
   const upPct = totalRatings > 0 ? Math.round((stats.thumbsUpCount / totalRatings) * 100) : 0;
   const maxTask = Math.max(...stats.taskLauncherUsage.map((t) => t.count), 1);
-  const TABS: { id: AdminTab; label: string }[] = [{ id: "dashboard", label: "Dashboard" }, { id: "users", label: "Users" }, { id: "feedback", label: "Feedback" }, { id: "settings", label: "Settings" }];
+  const TABS: { id: AdminTab; label: string }[] = [{ id: "inbox", label: "Inbox" }, { id: "dashboard", label: "Dashboard" }, { id: "users", label: "Users" }, { id: "settings", label: "Settings" }];
   const TH = ({ label, field }: { label: string; field?: string }) => (
     <th onClick={field ? () => handleSort(field) : undefined} style={{ padding: "10px 14px", textAlign: "left", fontSize: 12, fontWeight: 600, color: "#6B7280", borderBottom: "1px solid #E5E7EB", whiteSpace: "nowrap", cursor: field ? "pointer" : "default", userSelect: "none", background: "#FAFAFA" }}>
       {label}{field && <span style={{ marginLeft: 4, color: sortField === field ? "#C8963E" : "#9CA3AF", fontSize: 11 }}>{sortField === field ? (sortDir === "asc" ? "▲" : "▼") : "⇅"}</span>}
@@ -585,52 +612,88 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
           </div>
         )}
 
-        {/* ── FEEDBACK TAB ── */}
-        {activeTab === "feedback" && (
-          <div style={cardStyle}>
-            <div style={sectionTitleStyle}>Feedback</div>
-            <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 14 }}>Total Entries: {feedback.length}</div>
-            <div style={{ overflowX: "auto" }}>
-              <table style={tblStyle}>
-                <thead>
-                  <tr>
-                    {[
-                      { label: "Date", field: "createdAt" },
-                      { label: "User Email", field: "userEmail" },
-                      { label: "Domain", field: "domain" },
-                      { label: "Type", field: "feedbackType" },
-                      { label: "What They Were Trying To Do / Feedback", field: "detail" },
-                      { label: "File Size", field: "attemptedFileSize" },
-                    ].map(({ label, field }) => (
-                      <th key={field} onClick={() => handleFeedbackSort(field)} style={{ padding: "10px 14px", textAlign: "left", fontSize: 12, fontWeight: 600, color: "#6B7280", borderBottom: "1px solid #E5E7EB", whiteSpace: "nowrap", background: "#FAFAFA", cursor: "pointer", userSelect: "none" }}>
+        {/* ── INBOX TAB ── */}
+        {activeTab === "inbox" && (
+          <>
+            {/* Inquiries section */}
+            <div style={cardStyle}>
+              <div style={sectionTitleStyle}>Inquiries</div>
+              <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 16 }}>Get in Touch submissions · {sortedInquiries.length} total</div>
+              {sortedInquiries.length === 0 ? (
+                <p style={{ fontSize: 13, color: "#9CA3AF", margin: 0 }}>No inquiries yet.</p>
+              ) : (
+                <div style={{ border: "1px solid #E5E7EB", borderRadius: 8, overflow: "hidden" }}>
+                  {/* Sortable header row */}
+                  <div style={{ display: "grid", gridTemplateColumns: "120px 1fr 1fr 1fr", background: "#FAFAFA", borderBottom: "1px solid #E5E7EB" }}>
+                    {[{ label: "Date", field: "createdAt" }, { label: "Type", field: "inquiryType" }, { label: "Email", field: "userEmail" }, { label: "Domain", field: "domain" }].map(({ label, field }) => (
+                      <div key={field} onClick={() => handleInquirySort(field)} style={{ padding: "9px 14px", fontSize: 11, fontWeight: 600, color: "#6B7280", cursor: "pointer", userSelect: "none", display: "flex", alignItems: "center", gap: 4 }}>
                         {label}
-                        <span style={{ marginLeft: 4, color: feedbackSortField === field ? "#C8963E" : "#9CA3AF", fontSize: 11 }}>
-                          {feedbackSortField === field ? (feedbackSortDir === "asc" ? "▲" : "▼") : "⇅"}
-                        </span>
-                      </th>
+                        <span style={{ color: inquirySortField === field ? "#C8963E" : "#9CA3AF", fontSize: 10 }}>{inquirySortField === field ? (inquirySortDir === "asc" ? "▲" : "▼") : "⇅"}</span>
+                      </div>
                     ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {sortedFeedback.map((f) => (
-                    <tr key={f.id}>
-                      <TD style={{ whiteSpace: "nowrap" }}>{fmt(f.createdAt)}</TD>
-                      <TD style={{ maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.userEmail}</TD>
-                      <TD><span style={{ fontFamily: "monospace", fontSize: 12 }}>{f.domain || "—"}</span></TD>
-                      <TD>
-                        <span style={{ background: f.feedbackType === "user_feedback" ? "#EDE9FE" : "#FEF3C7", color: f.feedbackType === "user_feedback" ? "#5B21B6" : "#92400E", fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 10, whiteSpace: "nowrap" }}>
-                          {f.feedbackType.replace(/_/g, " ")}
-                        </span>
-                      </TD>
-                      <TD style={{ color: f.detail ? "#374151" : "#9CA3AF", fontStyle: f.detail ? "normal" : "italic" }}>{f.detail || "—"}</TD>
-                      <TD style={{ whiteSpace: "nowrap" }}>{f.feedbackType === "user_feedback" ? "—" : f.attemptedFileSize ? `${(f.attemptedFileSize / 1024 / 1024).toFixed(1)} MB` : "—"}</TD>
-                    </tr>
-                  ))}
-                  {feedback.length === 0 && <tr><td colSpan={6} style={{ padding: 20, textAlign: "center", color: "#9CA3AF", fontSize: 13 }}>No feedback entries yet</td></tr>}
-                </tbody>
-              </table>
+                  </div>
+                  {sortedInquiries.map((inq) => {
+                    const badgeMap: Record<string, { bg: string; text: string; label: string }> = {
+                      "AI training for my team": { bg: "#DCFCE7", text: "#166534", label: "Training" },
+                      "Help with a specific project": { bg: "#DCFCE7", text: "#166534", label: "Project" },
+                      "Share feedback about the tool": { bg: "#F1EFE8", text: "#5F5E5A", label: "Feedback" },
+                      "Something else": { bg: "#FAEEDA", text: "#633806", label: "Other" },
+                    };
+                    const badge = badgeMap[inq.inquiryType] ?? { bg: "#F3F4F6", text: "#374151", label: inq.inquiryType };
+                    const showPreferredEmail = inq.preferredEmail && inq.preferredEmail.toLowerCase() !== inq.userEmail.toLowerCase();
+                    return (
+                      <div key={inq.id} style={{ borderBottom: "1px solid #F3F4F6" }}>
+                        <div style={{ display: "grid", gridTemplateColumns: "120px 1fr 1fr 1fr", padding: "10px 14px 4px", alignItems: "center" }}>
+                          <span style={{ fontSize: 12, color: "#6B7280", whiteSpace: "nowrap" }}>{fmtShort(inq.createdAt)}</span>
+                          <span style={{ fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 10, background: badge.bg, color: badge.text, justifySelf: "start" }}>{badge.label}</span>
+                          <span style={{ fontSize: 13, color: "#374151", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{inq.userEmail}</span>
+                          <span style={{ fontSize: 12, color: "#6B7280", fontFamily: "monospace" }}>{inq.domain}</span>
+                        </div>
+                        <div style={{ padding: "0 14px 10px 134px" }}>
+                          <p style={{ margin: 0, fontSize: 13, color: "#6B7280", lineHeight: 1.55 }}>{inq.message}</p>
+                          {showPreferredEmail && <p style={{ margin: "4px 0 0", fontSize: 12, color: "#C8963E" }}>Preferred email: {inq.preferredEmail}</p>}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
-          </div>
+
+            {/* Upload issues section */}
+            <div style={cardStyle}>
+              <div style={sectionTitleStyle}>Upload issues</div>
+              <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 16 }}>Attempted file uploads that exceeded the size limit · {uploadIssues.length} total</div>
+              {uploadIssues.length === 0 ? (
+                <p style={{ fontSize: 13, color: "#9CA3AF", margin: 0 }}>No upload issues yet.</p>
+              ) : (
+                <div style={{ overflowX: "auto" }}>
+                  <table style={tblStyle}>
+                    <thead>
+                      <tr>
+                        {[{ label: "Date", field: "createdAt" }, { label: "Email", field: "userEmail" }, { label: "Domain", field: "domain" }, { label: "What they were trying to do", field: "detail" }, { label: "File Size", field: "attemptedFileSize" }].map(({ label, field }) => (
+                          <th key={field} onClick={() => handleFeedbackSort(field)} style={{ padding: "10px 14px", textAlign: "left", fontSize: 12, fontWeight: 600, color: "#6B7280", borderBottom: "1px solid #E5E7EB", whiteSpace: "nowrap", background: "#FAFAFA", cursor: "pointer", userSelect: "none" }}>
+                            {label}<span style={{ marginLeft: 4, color: feedbackSortField === field ? "#C8963E" : "#9CA3AF", fontSize: 11 }}>{feedbackSortField === field ? (feedbackSortDir === "asc" ? "▲" : "▼") : "⇅"}</span>
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {uploadIssues.map((f) => (
+                        <tr key={f.id}>
+                          <TD style={{ whiteSpace: "nowrap" }}>{fmt(f.createdAt)}</TD>
+                          <TD style={{ maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.userEmail}</TD>
+                          <TD><span style={{ fontFamily: "monospace", fontSize: 12 }}>{f.domain || "—"}</span></TD>
+                          <TD style={{ color: f.detail ? "#374151" : "#9CA3AF", fontStyle: f.detail ? "normal" : "italic" }}>{f.detail || "—"}</TD>
+                          <TD style={{ whiteSpace: "nowrap" }}>{f.attemptedFileSize ? `${(f.attemptedFileSize / 1024 / 1024).toFixed(1)} MB` : "—"}</TD>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </>
         )}
 
         {/* ── SETTINGS TAB ── */}

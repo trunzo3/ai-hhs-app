@@ -310,7 +310,7 @@ export default function Home() {
           )}
         </div>
         <div className="text-center text-xs text-muted-foreground/60">
-          Built by IQmeetEQ
+          Built by <a href="https://headandheartca.com" target="_blank" rel="noopener noreferrer" style={{ color: "inherit", textDecoration: "none" }} onMouseEnter={(e) => (e.currentTarget.style.textDecoration = "underline")} onMouseLeave={(e) => (e.currentTarget.style.textDecoration = "none")}>IQmeetEQ</a>
         </div>
       </div>
 

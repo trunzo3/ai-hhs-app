@@ -3,6 +3,7 @@ import healthRouter from "./health";
 import authRouter from "./auth";
 import chatRouter from "./chat";
 import feedbackRouter from "./feedback";
+import inquiriesRouter from "./inquiries";
 import adminRouter from "./admin";
 
 const router: IRouter = Router();
@@ -11,6 +12,7 @@ router.use(healthRouter);
 router.use(authRouter);
 router.use(chatRouter);
 router.use(feedbackRouter);
+router.use(inquiriesRouter);
 router.use(adminRouter);
 
 export default router;
