@@ -1,0 +1,70 @@
+**This is your prompt:**
+
+---
+
+Restructure the admin dashboard at /admin into a tabbed interface with 4 tabs. Keep the same navy header with "AI for HHS" wordmark and "Admin Dashboard" label. Add a horizontal tab bar below the header with four tabs: Dashboard, Users, Feedback, Settings. The active tab should be visually highlighted (gold underline or gold text). Clicking a tab shows that tab's content without a page reload.
+
+**TAB 1: Dashboard**
+
+Summary cards in two rows of 4 plus one full-width card:
+
+Row 1:
+- Total Users
+- New This Month
+- Weekly Active
+- Unmatched Domains This Week (red alert style: light red background #FEF2F2, red border 1.5px solid #DC2626, red number, dark red label)
+
+Row 2:
+- Returning vs. One-Time (format: "34 / 13" with "returning / one-time" below)
+- Total Conversations
+- Avg Messages / Conversation (one decimal)
+- Thumbs Up / Down (format: "89% up" with "142 up / 18 down" below)
+
+Full width:
+- Est. Cost This Month (dollar estimate with approximate token count in smaller gray text next to it)
+
+Below the cards:
+
+Breakdowns — two columns side by side:
+- Left: Users by County (county name + count, sorted highest first)
+- Right: Users by Service Category (category name + count, sorted highest first)
+
+Task Launcher Ranking:
+- All 8 task cards ranked by times tapped, with rank number, name, count, and a proportional gold (#C8963E) bar
+
+Unmatched Domain Registrations Table:
+- Red border (1.5px solid #DC2626)
+- Header with red dot and "Total: [count] — users registered without a recognized domain"
+- Columns: Email, Domain, County, Service Category, Registered, Connection Explanation
+- Horizontal scroll when window is narrow
+
+**TAB 2: Users**
+
+All Users Table:
+- Filter bar: search-by-email text field, county dropdown, service category dropdown
+- Header showing "Total Users: [count]" — updates to "Showing [filtered count] of [total]" when filters active
+- Columns: Email (sortable), Domain (sortable), County (sortable), Service Category (sortable), Registered (sortable), Last Active (sortable), Conversations (sortable), Match (sortable — "Yes" green / "No" red), Status (sortable — toggle switch, green Active / red Disabled)
+- Toggling Status to Disabled sets the disabled field to true in the database. That user sees "Your account has been paused. If you think this is an error, reach out to anthony@iqmeeteq.com" on their next login attempt.
+- Disabled rows have light red background (#FEF2F2)
+- Horizontal scroll when window is narrow
+
+**TAB 3: Feedback**
+
+Feedback Table:
+- Header showing "Total Entries: [count]"
+- Columns: Date, User Email, Type (small amber badge), What They Were Trying To Do, File Size
+- Horizontal scroll when window is narrow
+
+**TAB 4: Settings**
+
+Model Controls:
+- Active Model: dropdown to switch between "Claude Opus 4.6" and "Claude Sonnet 4.6" — changes which model the chatbot uses for new conversations
+- Auto-Downgrade Threshold: editable dollar amount with "/ month" label — when monthly spend exceeds this, automatically switch to Sonnet for the rest of the month, reset to selected model on the 1st
+
+Corpus Management (build the infrastructure for this):
+- Display a list of all documents currently in the RAG corpus: document name, last updated date, chunk count
+- Upload button to add a new markdown file — on upload, the file is chunked, embedded, and stored in pgvector automatically
+- Delete button on each document — removes the document and all its chunks from pgvector
+- Replace: upload a new version of an existing document — deletes old chunks and re-ingests the new file
+
+---

@@ -1,8 +1,9 @@
 import { Router, type IRouter } from "express";
 import { db, usersTable, conversationMetadataTable, responseRatingsTable, feedbackTable, appConfigTable, tokenUsageTable } from "@workspace/db";
-import { eq, count, avg, sum, desc, and } from "drizzle-orm";
+import { eq, count, avg, desc, and } from "drizzle-orm";
 import { sql } from "drizzle-orm";
-import { getActiveModel, getSpendThreshold, getCurrentMonth, getCurrentMonthSpend } from "../../lib/tokenTracker";
+import { getActiveModel, getSpendThreshold, getCurrentMonthSpend } from "../../lib/tokenTracker";
+import { ingestDocument } from "../../lib/rag";
 import { UpdateAdminConfigBody } from "@workspace/api-zod";
 import { logger } from "../../lib/logger";
 
@@ -74,10 +75,7 @@ router.get("/admin/stats", requireAdmin, async (req, res): Promise<void> => {
     const oneTimeUsers = convCountsRaw.filter((r) => r.convCount === 1).length;
 
     const taskLauncherUsageRaw = await db
-      .select({
-        label: conversationMetadataTable.taskLauncherUsed,
-        count: count(),
-      })
+      .select({ label: conversationMetadataTable.taskLauncherUsed, count: count() })
       .from(conversationMetadataTable)
       .where(sql`${conversationMetadataTable.taskLauncherUsed} IS NOT NULL`)
       .groupBy(conversationMetadataTable.taskLauncherUsed)
@@ -168,14 +166,11 @@ router.patch("/admin/users/:id", requireAdmin, async (req, res): Promise<void> =
   try {
     const { id } = req.params;
     const { disabled } = req.body;
-
     if (typeof disabled !== "boolean") {
       res.status(400).json({ error: "disabled must be a boolean" });
       return;
     }
-
     await db.update(usersTable).set({ disabled }).where(eq(usersTable.id, id));
-
     res.json({ success: true });
   } catch (err) {
     req.log.error({ err }, "Failed to update user status");
@@ -198,7 +193,7 @@ router.get("/admin/feedback", requireAdmin, async (req, res): Promise<void> => {
       .from(feedbackTable)
       .leftJoin(usersTable, eq(feedbackTable.userId, usersTable.id))
       .orderBy(desc(feedbackTable.createdAt))
-      .limit(100);
+      .limit(200);
 
     res.json(
       entries.map((e) => ({
@@ -217,17 +212,79 @@ router.get("/admin/feedback", requireAdmin, async (req, res): Promise<void> => {
   }
 });
 
+router.get("/admin/corpus", requireAdmin, async (req, res): Promise<void> => {
+  try {
+    const rows = await db.execute(sql`
+      SELECT doc_id, COUNT(*)::int AS chunk_count, MAX(created_at) AS last_updated
+      FROM corpus_chunks
+      GROUP BY doc_id
+      ORDER BY doc_id
+    `);
+    res.json(
+      (rows.rows as Array<{ doc_id: string; chunk_count: number; last_updated: string }>).map((r) => ({
+        docId: r.doc_id,
+        chunkCount: r.chunk_count,
+        lastUpdated: r.last_updated,
+      }))
+    );
+  } catch (err) {
+    req.log.error({ err }, "Failed to fetch corpus");
+    res.status(500).json({ error: "Failed to fetch corpus" });
+  }
+});
+
+router.post("/admin/corpus", requireAdmin, async (req, res): Promise<void> => {
+  try {
+    const { docId, content } = req.body;
+    if (!docId || typeof docId !== "string" || !content || typeof content !== "string") {
+      res.status(400).json({ error: "docId and content are required strings" });
+      return;
+    }
+    const existing = await db.execute(sql`SELECT COUNT(*)::int AS cnt FROM corpus_chunks WHERE doc_id = ${docId}`);
+    if (Number((existing.rows[0] as any)?.cnt) > 0) {
+      res.status(409).json({ error: "Document already exists. Use PUT to replace it." });
+      return;
+    }
+    await ingestDocument(docId, content);
+    res.status(201).json({ success: true, docId });
+  } catch (err) {
+    req.log.error({ err }, "Failed to ingest corpus document");
+    res.status(500).json({ error: "Failed to ingest document" });
+  }
+});
+
+router.put("/admin/corpus/:docId", requireAdmin, async (req, res): Promise<void> => {
+  try {
+    const { docId } = req.params;
+    const { content } = req.body;
+    if (!content || typeof content !== "string") {
+      res.status(400).json({ error: "content is required" });
+      return;
+    }
+    await ingestDocument(docId, content);
+    res.json({ success: true, docId });
+  } catch (err) {
+    req.log.error({ err }, "Failed to replace corpus document");
+    res.status(500).json({ error: "Failed to replace document" });
+  }
+});
+
+router.delete("/admin/corpus/:docId", requireAdmin, async (req, res): Promise<void> => {
+  try {
+    const { docId } = req.params;
+    await db.execute(sql`DELETE FROM corpus_chunks WHERE doc_id = ${docId}`);
+    res.json({ success: true });
+  } catch (err) {
+    req.log.error({ err }, "Failed to delete corpus document");
+    res.status(500).json({ error: "Failed to delete document" });
+  }
+});
+
 router.get("/admin/config", requireAdmin, async (req, res): Promise<void> => {
   const activeModel = await getActiveModel();
   const spendThreshold = await getSpendThreshold();
   const { spend, tokens } = await getCurrentMonthSpend();
-
-  res.json({
-    activeModel,
-    spendThreshold,
-    currentMonthSpend: spend,
-    currentMonthTokens: tokens,
-  });
+  res.json({ activeModel, spendThreshold, currentMonthSpend: spend, currentMonthTokens: tokens });
 });
 
 router.patch("/admin/config", requireAdmin, async (req, res): Promise<void> => {
@@ -236,39 +293,19 @@ router.patch("/admin/config", requireAdmin, async (req, res): Promise<void> => {
     res.status(400).json({ error: parsed.error.message });
     return;
   }
-
   const { activeModel, spendThreshold } = parsed.data;
-
   if (activeModel != null) {
-    await db
-      .insert(appConfigTable)
-      .values({ key: "active_model", value: activeModel })
-      .onConflictDoUpdate({
-        target: appConfigTable.key,
-        set: { value: activeModel, updatedAt: new Date() },
-      });
+    await db.insert(appConfigTable).values({ key: "active_model", value: activeModel })
+      .onConflictDoUpdate({ target: appConfigTable.key, set: { value: activeModel, updatedAt: new Date() } });
   }
-
   if (spendThreshold != null) {
-    await db
-      .insert(appConfigTable)
-      .values({ key: "spend_threshold", value: String(spendThreshold) })
-      .onConflictDoUpdate({
-        target: appConfigTable.key,
-        set: { value: String(spendThreshold), updatedAt: new Date() },
-      });
+    await db.insert(appConfigTable).values({ key: "spend_threshold", value: String(spendThreshold) })
+      .onConflictDoUpdate({ target: appConfigTable.key, set: { value: String(spendThreshold), updatedAt: new Date() } });
   }
-
   const updatedModel = await getActiveModel();
   const updatedThreshold = await getSpendThreshold();
   const { spend, tokens } = await getCurrentMonthSpend();
-
-  res.json({
-    activeModel: updatedModel,
-    spendThreshold: updatedThreshold,
-    currentMonthSpend: spend,
-    currentMonthTokens: tokens,
-  });
+  res.json({ activeModel: updatedModel, spendThreshold: updatedThreshold, currentMonthSpend: spend, currentMonthTokens: tokens });
 });
 
 export default router;
