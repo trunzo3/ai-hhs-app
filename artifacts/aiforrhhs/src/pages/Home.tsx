@@ -36,13 +36,39 @@ const SERVICE_CATEGORIES = [
   "Other"
 ];
 
-const registerSchema = z.object({
-  email: z.string().email({ message: "Invalid email address" }),
-  password: z.string().min(5, { message: "Password must be at least 5 characters" }),
-  county: z.string().min(1, { message: "Please select a county" }),
-  serviceCategory: z.string().min(1, { message: "Please select a category" }),
-  domainNote: z.string().optional(),
-});
+function isDomainMatch(email: string): boolean {
+  if (!email) return true;
+  const domain = email.split("@")[1]?.toLowerCase();
+  if (!domain) return true;
+  return (
+    domain.endsWith(".gov") ||
+    domain.endsWith(".ca.gov") ||
+    domain.endsWith(".ca.us") ||
+    domain.endsWith(".org") ||
+    domain.endsWith(".edu")
+  );
+}
+
+const registerSchema = z
+  .object({
+    email: z.string().email({ message: "Invalid email address" }),
+    password: z.string().min(5, { message: "Password must be at least 5 characters" }),
+    county: z.string().min(1, { message: "Please select a county" }),
+    serviceCategory: z.string().min(1, { message: "Please select a category" }),
+    domainNote: z.string().optional(),
+  })
+  .superRefine((data, ctx) => {
+    if (!isDomainMatch(data.email)) {
+      const note = data.domainNote?.trim() ?? "";
+      if (note.length < 10) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Please tell us a bit more about your connection (at least 10 characters).",
+          path: ["domainNote"],
+        });
+      }
+    }
+  });
 
 const loginSchema = z.object({
   email: z.string().email(),
@@ -50,7 +76,7 @@ const loginSchema = z.object({
 });
 
 export default function Home() {
-  const [location, setLocation] = useLocation();
+  const [, setLocation] = useLocation();
   const { data: user, isLoading: isUserLoading } = useGetMe({ query: { retry: false } });
   const [mode, setMode] = useState<"register" | "login">("register");
   const queryClient = useQueryClient();
@@ -82,15 +108,7 @@ export default function Home() {
     return <div className="min-h-screen bg-navy flex items-center justify-center"><Loader2 className="w-8 h-8 text-gold animate-spin" /></div>;
   }
 
-  const isDomainMatch = (email: string) => {
-    if (!email) return true;
-    const domain = email.split('@')[1]?.toLowerCase();
-    if (!domain) return true;
-    return domain.endsWith('.gov') || domain.endsWith('.ca.gov') || domain.endsWith('.ca.us') || domain.endsWith('.org') || domain.endsWith('.edu');
-  };
-
   const watchEmail = registerForm.watch("email");
-  const watchCategory = registerForm.watch("serviceCategory");
   const showDomainNote = !isDomainMatch(watchEmail);
 
   const onRegister = (values: z.infer<typeof registerSchema>) => {
@@ -101,7 +119,7 @@ export default function Home() {
       },
       onError: (err: any) => {
         toast({ variant: "destructive", title: "Registration failed", description: err?.message || "An error occurred." });
-      }
+      },
     });
   };
 
@@ -124,12 +142,12 @@ export default function Home() {
       onError: (err: any) => {
         setLoginError(err?.message || "Invalid credentials.");
         toast({ variant: "destructive", title: "Login failed", description: err?.message || "Invalid credentials." });
-      }
+      },
     });
   };
 
   return (
-    <div className="min-h-screen bg-sidebar text-foreground flex flex-col items-center justify-center p-4">
+    <div className="min-h-screen bg-sidebar text-foreground flex flex-col items-center justify-center p-4" style={{ position: "relative" }}>
       <div className="w-full max-w-md space-y-8">
         <div className="text-center">
           <h1 className="font-serif text-4xl text-primary font-bold tracking-tight">AI for HHS</h1>
@@ -185,7 +203,7 @@ export default function Home() {
                             </SelectTrigger>
                           </FormControl>
                           <SelectContent position="popper" className="max-h-64 overflow-y-auto">
-                            {COUNTIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                            {COUNTIES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
                           </SelectContent>
                         </Select>
                         <FormMessage />
@@ -205,7 +223,7 @@ export default function Home() {
                             </SelectTrigger>
                           </FormControl>
                           <SelectContent position="popper" className="max-h-64 overflow-y-auto">
-                            {SERVICE_CATEGORIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                            {SERVICE_CATEGORIES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
                           </SelectContent>
                         </Select>
                         <FormMessage />
@@ -218,9 +236,15 @@ export default function Home() {
                       name="domainNote"
                       render={({ field }) => (
                         <FormItem>
-                          <FormLabel className="text-card-foreground">Connection to County HHS</FormLabel>
+                          <FormLabel className="text-card-foreground">Tell us about your connection to county HHS</FormLabel>
                           <FormControl>
-                            <Input placeholder="Briefly describe your role" className="text-foreground bg-background" {...field} data-testid="input-domain-note" />
+                            <textarea
+                              placeholder="Briefly describe your role or connection (e.g., I'm a contractor supporting Sacramento DHSS...)"
+                              className="flex w-full rounded-md border border-gray-300 bg-background px-3 py-2 text-sm text-foreground shadow-sm placeholder:text-gray-400 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring resize-none"
+                              rows={3}
+                              data-testid="input-domain-note"
+                              {...field}
+                            />
                           </FormControl>
                           <FormMessage />
                         </FormItem>
@@ -289,6 +313,30 @@ export default function Home() {
           Built by IQmeetEQ
         </div>
       </div>
+
+      {/* Subtle gear icon — bottom-right corner, admin entry point */}
+      <a
+        href="/admin"
+        title="Admin"
+        style={{
+          position: "fixed",
+          bottom: 18,
+          right: 20,
+          opacity: 0.18,
+          color: "#9CA3AF",
+          textDecoration: "none",
+          transition: "opacity 0.2s",
+          lineHeight: 1,
+        }}
+        onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.opacity = "0.55")}
+        onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.opacity = "0.18")}
+        data-testid="btn-admin-gear"
+      >
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="12" r="3" />
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+        </svg>
+      </a>
     </div>
   );
 }

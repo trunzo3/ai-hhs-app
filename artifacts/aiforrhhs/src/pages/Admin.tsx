@@ -98,7 +98,7 @@ export default function Admin() {
     } else { setLoginError("Invalid admin credentials."); }
   };
 
-  const handleLogout = () => { sessionStorage.removeItem("adminAuth"); setAdminAuthenticated(false); setIsAuthenticated(false); };
+  const handleLogout = () => { sessionStorage.removeItem("adminAuth"); setAdminAuthenticated(false); window.location.href = "/"; };
 
   if (isCheckingAuth) return <div style={{ minHeight: "100vh", background: "#1A2744", display: "flex", alignItems: "center", justifyContent: "center" }}><Spinner /><GlobalStyles /></div>;
 
@@ -137,6 +137,8 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
   const [filterCategory, setFilterCategory] = useState("");
   const [sortField, setSortField] = useState("");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  const [feedbackSortField, setFeedbackSortField] = useState("createdAt");
+  const [feedbackSortDir, setFeedbackSortDir] = useState<"asc" | "desc">("desc");
   const [thresholdInput, setThresholdInput] = useState("");
   const [savingConfig, setSavingConfig] = useState(false);
 
@@ -319,6 +321,19 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
     else { setSortField(field); setSortDir("asc"); }
   };
 
+  const handleFeedbackSort = (field: string) => {
+    if (feedbackSortField === field) setFeedbackSortDir((d) => d === "asc" ? "desc" : "asc");
+    else { setFeedbackSortField(field); setFeedbackSortDir("asc"); }
+  };
+
+  const sortedFeedback = [...feedback].sort((a: any, b: any) => {
+    let av = a[feedbackSortField], bv = b[feedbackSortField];
+    if (av == null) av = ""; if (bv == null) bv = "";
+    if (av < bv) return feedbackSortDir === "asc" ? -1 : 1;
+    if (av > bv) return feedbackSortDir === "asc" ? 1 : -1;
+    return 0;
+  });
+
   const counties = [...new Set(users.map((u) => u.county))].sort();
   const categories = [...new Set(users.map((u) => u.serviceCategory))].sort();
   const filteredUsers = users.filter((u) => {
@@ -486,15 +501,36 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
             <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 14 }}>Total Entries: {feedback.length}</div>
             <div style={{ overflowX: "auto" }}>
               <table style={tblStyle}>
-                <thead><tr>{["Date","User Email","Type","What They Were Trying To Do","File Size"].map((h) => <th key={h} style={{ padding: "10px 14px", textAlign: "left", fontSize: 12, fontWeight: 600, color: "#6B7280", borderBottom: "1px solid #E5E7EB", whiteSpace: "nowrap", background: "#FAFAFA" }}>{h}</th>)}</tr></thead>
+                <thead>
+                  <tr>
+                    {[
+                      { label: "Date", field: "createdAt" },
+                      { label: "User Email", field: "userEmail" },
+                      { label: "Type", field: "feedbackType" },
+                      { label: "What They Were Trying To Do / Feedback", field: "detail" },
+                      { label: "File Size", field: "attemptedFileSize" },
+                    ].map(({ label, field }) => (
+                      <th key={field} onClick={() => handleFeedbackSort(field)} style={{ padding: "10px 14px", textAlign: "left", fontSize: 12, fontWeight: 600, color: "#6B7280", borderBottom: "1px solid #E5E7EB", whiteSpace: "nowrap", background: "#FAFAFA", cursor: "pointer", userSelect: "none" }}>
+                        {label}
+                        <span style={{ marginLeft: 4, color: feedbackSortField === field ? "#C8963E" : "#9CA3AF", fontSize: 11 }}>
+                          {feedbackSortField === field ? (feedbackSortDir === "asc" ? "▲" : "▼") : "⇅"}
+                        </span>
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
                 <tbody>
-                  {feedback.map((f) => (
+                  {sortedFeedback.map((f) => (
                     <tr key={f.id}>
                       <TD style={{ whiteSpace: "nowrap" }}>{fmt(f.createdAt)}</TD>
                       <TD style={{ maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.userEmail}</TD>
-                      <TD><span style={{ background: "#FEF3C7", color: "#92400E", fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 10, whiteSpace: "nowrap" }}>{f.feedbackType.replace(/_/g, " ")}</span></TD>
+                      <TD>
+                        <span style={{ background: f.feedbackType === "user_feedback" ? "#EDE9FE" : "#FEF3C7", color: f.feedbackType === "user_feedback" ? "#5B21B6" : "#92400E", fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 10, whiteSpace: "nowrap" }}>
+                          {f.feedbackType.replace(/_/g, " ")}
+                        </span>
+                      </TD>
                       <TD style={{ color: f.detail ? "#374151" : "#9CA3AF", fontStyle: f.detail ? "normal" : "italic" }}>{f.detail || "—"}</TD>
-                      <TD style={{ whiteSpace: "nowrap" }}>{f.attemptedFileSize ? `${(f.attemptedFileSize / 1024 / 1024).toFixed(1)} MB` : "—"}</TD>
+                      <TD style={{ whiteSpace: "nowrap" }}>{f.feedbackType === "user_feedback" ? "—" : f.attemptedFileSize ? `${(f.attemptedFileSize / 1024 / 1024).toFixed(1)} MB` : "—"}</TD>
                     </tr>
                   ))}
                   {feedback.length === 0 && <tr><td colSpan={5} style={{ padding: 20, textAlign: "center", color: "#9CA3AF", fontSize: 13 }}>No feedback entries yet</td></tr>}

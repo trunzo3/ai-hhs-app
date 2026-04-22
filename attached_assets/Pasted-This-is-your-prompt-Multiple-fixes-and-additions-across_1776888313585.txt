@@ -1,0 +1,25 @@
+This is your prompt:
+
+Multiple fixes and additions across the app:
+PDF UPLOAD FIX:
+Uploading a PDF in the chat currently fails with "Something went wrong." Fix the PDF upload so that when a user attaches a PDF, it is encoded as base64 and sent to the Anthropic API as a document in the messages array. Claude reads PDFs natively — no text extraction needed on the backend. Test with a real PDF to confirm it works.
+WORD DOC UPLOAD SUPPORT:
+Add support for uploading .docx and .doc files in the chat. Since the Anthropic API does not read Word files natively, convert the Word document to text on the backend before sending it to Claude as part of the message. The file upload button should accept .pdf, .docx, and .doc files.
+SHIFT-ENTER LINE BREAKS:
+In the chat input field, pressing Enter sends the message. Pressing Shift-Enter should insert a line break instead of sending. This is standard behavior in chat apps.
+MARKDOWN RENDERING:
+Assistant responses are currently displaying raw markdown syntax (like bold, - bullets, 1. numbered lists) as plain text. Add a markdown rendering library so that assistant responses render formatted text — bold, italics, bullet lists, numbered lists, headers, and code blocks all display properly.
+STOP BUTTON AND INPUT CONTROL:
+While the assistant is generating a response: disable the input field so the user cannot type, and transform the send button into a stop button (square icon instead of arrow, same position and size). Clicking the stop button stops the generation. When generation finishes or is stopped, the input re-enables and the button reverts to the send arrow. The stop button only responds to mouse clicks — pressing Enter while generation is in progress should do nothing since the input field is disabled.
+CONNECTION EXPLANATION REQUIRED:
+When a user registers with an email domain that does not match our recognized patterns (.gov, .ca.gov, .ca.us, .org, .edu), the "Tell us about your connection to county HHS" text field appears. Make this field required — the form cannot be submitted with it blank. Set a minimum length of 10 characters. If they try to submit with fewer than 10 characters, show a message: "Please tell us a bit more about your connection (at least 10 characters)."
+ADMIN DASHBOARD DATA FIX:
+The Dashboard tab in the admin panel is not showing data in the breakdowns (Users by County, Users by Service Category) or the summary cards even though users have registered. Fix the database queries so that all summary cards, breakdowns, and the task launcher ranking pull real data from the database and display it correctly.
+FEEDBACK FORM:
+Add a "Feedback" text link in the chat interface header, positioned to the left of "New chat." Clicking it opens a modal overlay on top of the chat (the conversation stays visible behind it). The modal contains: a text area (3-4 lines tall, placeholder text: "What's working? What's not? What do you wish this tool could do?"), a Submit button, and a Cancel button. Cancel closes the modal. Submit writes the entry to the feedback table with type "user feedback" and closes the modal.
+FEEDBACK TABLE UPDATES:
+The feedback table in the admin panel now receives two types of entries: "file upload error" (from the file-too-large flow) and "user feedback" (from the new feedback form). For user feedback entries, the File Size column should display "—" instead of a size. Make all columns in the feedback table sortable by clicking the column header.
+ADMIN ACCESS REDESIGN:
+Remove the separate admin cookie/session logic entirely. Instead, add a small, subtle gear icon on the main login/registration page — bottom right corner, barely visible, gray color. Clicking the gear icon navigates to /admin where the admin login form appears. When an admin logs out of the admin panel, they are taken back to the main landing/registration page (not the admin login). This eliminates the problem of getting stuck on the admin login screen after logging out. Clean up any dead code related to the old separate admin session approach.
+VERIFY JSON STRIPPING:
+Confirm that the raw JSON followUp text (like {"followUps":["..."]}) is fully stripped from assistant responses in all cases — task launcher card responses, free text responses, and multi-turn conversations. The JSON should only appear as rendered follow-up pill buttons, never as visible text.

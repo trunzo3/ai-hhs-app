@@ -1,5 +1,6 @@
 import { Router, type IRouter } from "express";
 import Anthropic from "@anthropic-ai/sdk";
+import mammoth from "mammoth";
 import { db, conversationMetadataTable, responseRatingsTable, usersTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { buildSystemPromptFromDB } from "../../lib/systemPrompt";
@@ -25,6 +26,11 @@ const anthropic = new Anthropic({
 });
 
 const router: IRouter = Router();
+
+const WORD_MEDIA_TYPES = [
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/msword",
+];
 
 function requireAuth(req: any, res: any, next: any): void {
   if (!(req.session as any).userId) {
@@ -75,16 +81,35 @@ router.post("/chat/message", requireAuth, async (req, res): Promise<void> => {
   addMessage(conversationId, { role: "user", content: message, timestamp: new Date() });
 
   const messageContent: Anthropic.ContentBlockParam[] = [];
+  let hasPDF = false;
 
   if (fileBase64 && fileMediaType) {
-    messageContent.push({
-      type: "document",
-      source: {
-        type: "base64",
-        media_type: fileMediaType as "application/pdf",
-        data: fileBase64,
-      },
-    } as any);
+    if (fileMediaType === "application/pdf") {
+      hasPDF = true;
+      messageContent.push({
+        type: "document",
+        source: {
+          type: "base64",
+          media_type: "application/pdf",
+          data: fileBase64,
+        },
+      } as any);
+    } else if (WORD_MEDIA_TYPES.includes(fileMediaType)) {
+      try {
+        const buffer = Buffer.from(fileBase64, "base64");
+        const result = await mammoth.extractRawText({ buffer });
+        const extractedText = result.value.trim();
+        if (extractedText) {
+          messageContent.push({
+            type: "text",
+            text: `[Attached Word Document]\n\n${extractedText}`,
+          });
+        }
+      } catch (err) {
+        logger.warn({ err }, "Failed to extract text from Word document");
+        messageContent.push({ type: "text", text: "[A Word document was attached but could not be read.]" });
+      }
+    }
   }
 
   messageContent.push({ type: "text", text: message });
@@ -107,12 +132,14 @@ router.post("/chat/message", requireAuth, async (req, res): Promise<void> => {
   let fullResponse = "";
 
   try {
-    const stream = await anthropic.messages.stream({
-      model,
-      max_tokens: 2048,
-      system: systemPrompt,
-      messages,
-    });
+    const requestOptions = hasPDF
+      ? { headers: { "anthropic-beta": "pdfs-2024-09-25" } }
+      : undefined;
+
+    const stream = anthropic.messages.stream(
+      { model, max_tokens: 2048, system: systemPrompt, messages },
+      requestOptions,
+    );
 
     for await (const chunk of stream) {
       if (chunk.type === "content_block_delta" && chunk.delta.type === "text_delta") {
@@ -125,19 +152,16 @@ router.post("/chat/message", requireAuth, async (req, res): Promise<void> => {
     const finalMessage = await stream.finalMessage();
     const inputTokens = finalMessage.usage.input_tokens;
     const outputTokens = finalMessage.usage.output_tokens;
-
     await trackTokenUsage(inputTokens, outputTokens, model);
 
     let followUps: string[] = ["Simpler", "What's missing?"];
-    const jsonMatch = fullResponse.match(/\{"followUps":\[.*?\]\}/);
+    const jsonMatch = fullResponse.match(/\s*\{"followUps":\s*\[[\s\S]*?\]\}\s*$/);
     if (jsonMatch) {
       try {
-        const parsed = JSON.parse(jsonMatch[0]);
-        if (Array.isArray(parsed.followUps)) {
-          followUps = parsed.followUps;
-        }
-        fullResponse = fullResponse.replace(jsonMatch[0], "").trim();
-      } catch {}
+        const parsed = JSON.parse(jsonMatch[0].trim());
+        if (Array.isArray(parsed.followUps)) followUps = parsed.followUps;
+        fullResponse = fullResponse.slice(0, fullResponse.length - jsonMatch[0].length).trimEnd();
+      } catch { /* keep defaults */ }
     }
 
     addMessage(conversationId, { role: "assistant", content: fullResponse, timestamp: new Date() });
@@ -150,6 +174,8 @@ router.post("/chat/message", requireAuth, async (req, res): Promise<void> => {
     let errorMessage = "Something went wrong. Please try again.";
     if (err?.status === 400 && err?.message?.includes("credit balance")) {
       errorMessage = "The AI service is temporarily unavailable due to account limits. Please contact the administrator.";
+    } else if (err?.status === 400) {
+      errorMessage = "Unable to process this request. If you attached a file, try removing it and resending.";
     } else if (err?.status === 529 || err?.status === 503) {
       errorMessage = "The AI service is overloaded. Please wait a moment and try again.";
     }
@@ -176,13 +202,7 @@ router.post("/chat/conversation/:conversationId/rate", requireAuth, async (req, 
   const { rating, messageIndex } = body.data;
   const { conversationId } = params.data;
 
-  await db.insert(responseRatingsTable).values({
-    conversationId,
-    userId,
-    rating,
-    messageIndex,
-  });
-
+  await db.insert(responseRatingsTable).values({ conversationId, userId, rating, messageIndex });
   res.json({ success: true });
 });
 
