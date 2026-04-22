@@ -59,14 +59,13 @@ export default function Home() {
   const loginMutation = useLogin();
   const registerMutation = useRegister();
 
+  const [loginEmail, setLoginEmail] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
+  const [loginError, setLoginError] = useState("");
+
   const registerForm = useForm<z.infer<typeof registerSchema>>({
     resolver: zodResolver(registerSchema),
     defaultValues: { email: "", password: "", county: "", serviceCategory: "", domainNote: "" },
-  });
-
-  const loginForm = useForm<z.infer<typeof loginSchema>>({
-    resolver: zodResolver(loginSchema),
-    defaultValues: { email: "", password: "" },
   });
 
   useEffect(() => {
@@ -102,13 +101,20 @@ export default function Home() {
     });
   };
 
-  const onLogin = (values: z.infer<typeof loginSchema>) => {
-    loginMutation.mutate({ data: values }, {
+  const onLogin = (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoginError("");
+    if (!loginEmail || !loginPassword) {
+      setLoginError("Email and password are required.");
+      return;
+    }
+    loginMutation.mutate({ data: { email: loginEmail, password: loginPassword } }, {
       onSuccess: () => {
         queryClient.invalidateQueries({ queryKey: getGetMeQueryKey() });
         setLocation("/chat");
       },
       onError: (err: any) => {
+        setLoginError(err?.message || "Invalid credentials.");
         toast({ variant: "destructive", title: "Login failed", description: err?.message || "Invalid credentials." });
       }
     });
@@ -227,43 +233,42 @@ export default function Home() {
             </div>
           ) : (
             <div className="space-y-6">
-              <Form {...loginForm}>
-                <form onSubmit={loginForm.handleSubmit(onLogin)} className="space-y-4">
-                  <FormField
-                    control={loginForm.control}
-                    name="email"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel className="text-card-foreground">Work Email</FormLabel>
-                        <FormControl>
-                          <Input placeholder="name@county.ca.gov" className="text-foreground bg-background" {...field} data-testid="input-login-email" />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
+              <form onSubmit={onLogin} className="space-y-4">
+                <div className="space-y-1">
+                  <label className="text-sm font-medium text-card-foreground" htmlFor="login-email">Work Email</label>
+                  <input
+                    id="login-email"
+                    type="email"
+                    value={loginEmail}
+                    onChange={(e) => setLoginEmail(e.target.value)}
+                    placeholder="name@county.ca.gov"
+                    autoComplete="email"
+                    className="flex h-9 w-full rounded-md border border-gray-300 bg-white px-3 py-1 text-sm text-gray-900 shadow-sm placeholder:text-gray-400 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                    data-testid="input-login-email"
                   />
-                  <FormField
-                    control={loginForm.control}
-                    name="password"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel className="text-card-foreground">Password</FormLabel>
-                        <FormControl>
-                          <Input type="password" placeholder="••••••••" className="text-foreground bg-background" {...field} data-testid="input-login-password" />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
+                </div>
+                <div className="space-y-1">
+                  <label className="text-sm font-medium text-card-foreground" htmlFor="login-password">Password</label>
+                  <input
+                    id="login-password"
+                    type="password"
+                    value={loginPassword}
+                    onChange={(e) => setLoginPassword(e.target.value)}
+                    placeholder="••••••••"
+                    autoComplete="current-password"
+                    className="flex h-9 w-full rounded-md border border-gray-300 bg-white px-3 py-1 text-sm text-gray-900 shadow-sm placeholder:text-gray-400 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                    data-testid="input-login-password"
                   />
-                  <div className="text-right">
-                     <button type="button" className="text-sm text-primary hover:underline" data-testid="btn-forgot-password">Forgot password?</button>
-                  </div>
-                  <Button type="submit" className="w-full bg-primary text-primary-foreground hover:bg-primary/90" disabled={loginMutation.isPending} data-testid="btn-login">
-                    {loginMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
-                    Log In
-                  </Button>
-                </form>
-              </Form>
+                </div>
+                {loginError && <p className="text-sm text-destructive">{loginError}</p>}
+                <div className="text-right">
+                  <button type="button" className="text-sm text-primary hover:underline" data-testid="btn-forgot-password">Forgot password?</button>
+                </div>
+                <Button type="submit" className="w-full bg-primary text-primary-foreground hover:bg-primary/90" disabled={loginMutation.isPending} data-testid="btn-login">
+                  {loginMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+                  Log In
+                </Button>
+              </form>
               <div className="text-center text-sm">
                 <button type="button" onClick={() => setMode("register")} className="text-primary hover:underline" data-testid="btn-switch-register">
                   Need an account? Register
