@@ -23,11 +23,13 @@ const COUNTIES = [
 ];
 
 const SERVICE_CATEGORIES = [
+  "Child Support Services",
   "Child Welfare / CPS",
   "Adult Protective Services",
   "Eligibility & Benefits",
   "In-Home Supportive Services (IHSS)",
   "Behavioral Health",
+  "Primary Health Services",
   "Public Health",
   "Housing & Homeless Services",
   "Administrative / Operations",
