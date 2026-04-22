@@ -117,15 +117,17 @@ export default function Home() {
       <div className="w-full max-w-md space-y-8">
         <div className="text-center">
           <h1 className="font-serif text-4xl text-primary font-bold tracking-tight">AIforHHS</h1>
-          <p className="mt-2 text-muted-foreground font-sans">Your trusted partner in public service.</p>
+        </div>
+
+        <div className="px-4 py-4 rounded-lg border border-primary/40 bg-primary/10 text-center">
+          <p className="font-sans text-sm font-semibold text-white leading-snug">
+            AIforHHS never stores your conversations. Avoid entering client names, case numbers, or other identifying information.
+          </p>
         </div>
 
         <div className="bg-card p-6 rounded-lg shadow-lg border border-border">
           {mode === "register" ? (
             <div className="space-y-6">
-              <div className="p-4 bg-muted/50 rounded-md border border-border/50 text-sm text-foreground/80">
-                <span className="font-semibold text-primary">Trust Statement:</span> AIforHHS never stores your conversations. Avoid entering client names, case numbers, or other identifying information.
-              </div>
               <Form {...registerForm}>
                 <form onSubmit={registerForm.handleSubmit(onRegister)} className="space-y-4">
                   <FormField
