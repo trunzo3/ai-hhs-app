@@ -320,8 +320,11 @@ export default function Chat() {
       <style>{`
         .md-body p { margin: 0 0 8px 0; }
         .md-body p:last-child { margin-bottom: 0; }
-        .md-body ul, .md-body ol { padding-left: 22px; margin: 0 0 8px 0; }
-        .md-body li { margin: 2px 0; }
+        .md-body ul { list-style-type: disc; padding-left: 22px; margin: 0 0 8px 0; }
+        .md-body ol { list-style-type: decimal; padding-left: 22px; margin: 0 0 8px 0; }
+        .md-body li { margin: 2px 0; display: list-item; }
+        .md-body ul ul { list-style-type: circle; margin-bottom: 0; }
+        .md-body ul ul ul { list-style-type: square; }
         .md-body h1 { font-size: 18px; font-weight: 700; margin: 14px 0 6px; }
         .md-body h2 { font-size: 16px; font-weight: 600; margin: 12px 0 5px; }
         .md-body h3 { font-size: 15px; font-weight: 600; margin: 10px 0 4px; }
