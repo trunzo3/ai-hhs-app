@@ -3,13 +3,21 @@ info:
   # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: AIforHHS API specification
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: auth
+    description: Authentication operations
+  - name: chat
+    description: Chat and AI operations
+  - name: admin
+    description: Admin operations
+  - name: feedback
+    description: Feedback operations
 paths:
   /healthz:
     get:
@@ -24,6 +32,348 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /auth/register:
+    post:
+      operationId: register
+      tags: [auth]
+      summary: Register a new user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterBody"
+      responses:
+        "201":
+          description: User registered successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Email already exists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /auth/login:
+    post:
+      operationId: login
+      tags: [auth]
+      summary: Login with email and password
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginBody"
+      responses:
+        "200":
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "401":
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /auth/logout:
+    post:
+      operationId: logout
+      tags: [auth]
+      summary: Logout current user
+      responses:
+        "200":
+          description: Logged out
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /auth/me:
+    get:
+      operationId: getMe
+      tags: [auth]
+      summary: Get current authenticated user
+      responses:
+        "200":
+          description: Current user info
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserResponse"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /auth/forgot-password:
+    post:
+      operationId: forgotPassword
+      tags: [auth]
+      summary: Request password reset email
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ForgotPasswordBody"
+      responses:
+        "200":
+          description: Reset email sent if account exists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /auth/reset-password:
+    post:
+      operationId: resetPassword
+      tags: [auth]
+      summary: Reset password using token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResetPasswordBody"
+      responses:
+        "200":
+          description: Password reset successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+        "400":
+          description: Invalid or expired token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /chat/message:
+    post:
+      operationId: sendMessage
+      tags: [chat]
+      summary: Send a chat message and get AI response (streaming)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SendMessageBody"
+      responses:
+        "200":
+          description: Streaming response (text/event-stream)
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /chat/conversation/start:
+    post:
+      operationId: startConversation
+      tags: [chat]
+      summary: Start a new conversation, returns conversation ID
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StartConversationBody"
+      responses:
+        "201":
+          description: Conversation started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConversationResponse"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /chat/conversation/{conversationId}/rate:
+    post:
+      operationId: rateResponse
+      tags: [chat]
+      summary: Rate an assistant response (thumbs up/down)
+      parameters:
+        - name: conversationId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RateResponseBody"
+      responses:
+        "200":
+          description: Rating recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /feedback:
+    post:
+      operationId: submitFeedback
+      tags: [feedback]
+      summary: Submit user feedback (e.g. file too large)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FeedbackBody"
+      responses:
+        "201":
+          description: Feedback recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /admin/stats:
+    get:
+      operationId: getAdminStats
+      tags: [admin]
+      summary: Get admin dashboard statistics
+      responses:
+        "200":
+          description: Admin statistics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminStats"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /admin/users:
+    get:
+      operationId: getAdminUsers
+      tags: [admin]
+      summary: Get list of registered users with metadata
+      responses:
+        "200":
+          description: List of users
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AdminUser"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /admin/feedback:
+    get:
+      operationId: getAdminFeedback
+      tags: [admin]
+      summary: Get feedback entries
+      responses:
+        "200":
+          description: Feedback entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/FeedbackEntry"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /admin/config:
+    get:
+      operationId: getAdminConfig
+      tags: [admin]
+      summary: Get admin configuration (model, threshold)
+      responses:
+        "200":
+          description: Admin configuration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminConfig"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    patch:
+      operationId: updateAdminConfig
+      tags: [admin]
+      summary: Update admin configuration
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminConfigUpdate"
+      responses:
+        "200":
+          description: Configuration updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminConfig"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
 components:
   schemas:
     HealthStatus:
@@ -34,3 +384,316 @@ components:
       required:
         - status
 
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+      required:
+        - error
+
+    SuccessResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+      required:
+        - success
+
+    RegisterBody:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 5
+        county:
+          type: string
+        serviceCategory:
+          type: string
+        domainNote:
+          type: ["string", "null"]
+      required:
+        - email
+        - password
+        - county
+        - serviceCategory
+
+    LoginBody:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+      required:
+        - email
+        - password
+
+    ForgotPasswordBody:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+      required:
+        - email
+
+    ResetPasswordBody:
+      type: object
+      properties:
+        token:
+          type: string
+        password:
+          type: string
+          minLength: 5
+      required:
+        - token
+        - password
+
+    AuthResponse:
+      type: object
+      properties:
+        user:
+          $ref: "#/components/schemas/UserResponse"
+      required:
+        - user
+
+    UserResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        email:
+          type: string
+        county:
+          type: string
+        serviceCategory:
+          type: string
+        domainMatch:
+          type: boolean
+        createdAt:
+          type: string
+      required:
+        - id
+        - email
+        - county
+        - serviceCategory
+        - domainMatch
+        - createdAt
+
+    SendMessageBody:
+      type: object
+      properties:
+        conversationId:
+          type: string
+        message:
+          type: string
+        fileBase64:
+          type: ["string", "null"]
+        fileMediaType:
+          type: ["string", "null"]
+        taskLauncher:
+          type: ["string", "null"]
+        workingOutsideArea:
+          type: boolean
+      required:
+        - conversationId
+        - message
+
+    StartConversationBody:
+      type: object
+      properties:
+        taskLauncher:
+          type: ["string", "null"]
+      required: []
+
+    ConversationResponse:
+      type: object
+      properties:
+        conversationId:
+          type: string
+      required:
+        - conversationId
+
+    RateResponseBody:
+      type: object
+      properties:
+        rating:
+          type: string
+          enum: ["up", "down"]
+        messageIndex:
+          type: integer
+      required:
+        - rating
+        - messageIndex
+
+    FeedbackBody:
+      type: object
+      properties:
+        feedbackType:
+          type: string
+        detail:
+          type: ["string", "null"]
+        attemptedFileSize:
+          type: ["integer", "null"]
+      required:
+        - feedbackType
+
+    AdminStats:
+      type: object
+      properties:
+        totalUsers:
+          type: integer
+        usersByCounty:
+          type: array
+          items:
+            $ref: "#/components/schemas/CountStat"
+        usersByServiceCategory:
+          type: array
+          items:
+            $ref: "#/components/schemas/CountStat"
+        unmatchedDomainCount:
+          type: integer
+        totalConversations:
+          type: integer
+        avgMessagesPerConversation:
+          type: number
+        taskLauncherUsage:
+          type: array
+          items:
+            $ref: "#/components/schemas/CountStat"
+        thumbsUpCount:
+          type: integer
+        thumbsDownCount:
+          type: integer
+        feedbackCount:
+          type: integer
+        currentMonthSpend:
+          type: number
+        activeModel:
+          type: string
+        spendThreshold:
+          type: number
+        recentActivityByCounty:
+          type: array
+          items:
+            $ref: "#/components/schemas/CountyActivity"
+      required:
+        - totalUsers
+        - usersByCounty
+        - usersByServiceCategory
+        - unmatchedDomainCount
+        - totalConversations
+        - avgMessagesPerConversation
+        - taskLauncherUsage
+        - thumbsUpCount
+        - thumbsDownCount
+        - feedbackCount
+        - currentMonthSpend
+        - activeModel
+        - spendThreshold
+        - recentActivityByCounty
+
+    CountStat:
+      type: object
+      properties:
+        label:
+          type: string
+        count:
+          type: integer
+      required:
+        - label
+        - count
+
+    CountyActivity:
+      type: object
+      properties:
+        county:
+          type: string
+        lastActivity:
+          type: string
+        userCount:
+          type: integer
+      required:
+        - county
+        - lastActivity
+        - userCount
+
+    AdminUser:
+      type: object
+      properties:
+        id:
+          type: string
+        email:
+          type: string
+        county:
+          type: string
+        serviceCategory:
+          type: string
+        domainMatch:
+          type: boolean
+        domainNote:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+        lastActive:
+          type: ["string", "null"]
+      required:
+        - id
+        - email
+        - county
+        - serviceCategory
+        - domainMatch
+        - createdAt
+
+    FeedbackEntry:
+      type: object
+      properties:
+        id:
+          type: string
+        userId:
+          type: string
+        feedbackType:
+          type: string
+        detail:
+          type: ["string", "null"]
+        attemptedFileSize:
+          type: ["integer", "null"]
+        createdAt:
+          type: string
+      required:
+        - id
+        - userId
+        - feedbackType
+        - createdAt
+
+    AdminConfig:
+      type: object
+      properties:
+        activeModel:
+          type: string
+        spendThreshold:
+          type: number
+        currentMonthSpend:
+          type: number
+        currentMonthTokens:
+          type: integer
+      required:
+        - activeModel
+        - spendThreshold
+        - currentMonthSpend
+        - currentMonthTokens
+
+    AdminConfigUpdate:
+      type: object
+      properties:
+        activeModel:
+          type: ["string", "null"]
+        spendThreshold:
+          type: ["number", "null"]
