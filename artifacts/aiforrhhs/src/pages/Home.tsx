@@ -110,8 +110,9 @@ export default function Home() {
   const onRegister = (values: z.infer<typeof registerSchema>) => {
     registerMutation.mutate({ data: values }, {
       onSuccess: () => {
-        queryClient.invalidateQueries({ queryKey: getGetMeQueryKey() });
-        setLocation("/chat");
+        setLoginEmail(values.email);
+        setMode("login");
+        toast({ title: "Account created!", description: "Please log in with your new credentials." });
       },
       onError: (err: any) => {
         toast({ variant: "destructive", title: "Registration failed", description: err?.message || "An error occurred." });

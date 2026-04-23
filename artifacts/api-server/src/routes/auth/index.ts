@@ -100,9 +100,18 @@ router.post("/auth/login", async (req, res): Promise<void> => {
   });
 });
 
-router.post("/auth/logout", async (req, res): Promise<void> => {
-  req.session.destroy(() => {});
-  res.json({ success: true, message: "Logged out" });
+router.post("/auth/logout", (req, res): void => {
+  req.session.destroy((err) => {
+    if (err) {
+      logger.error({ err }, "Session destroy failed");
+    }
+    res.clearCookie("hhs_user_sid", {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+    });
+    res.json({ success: true, message: "Logged out" });
+  });
 });
 
 router.get("/auth/me", async (req, res): Promise<void> => {
