@@ -96,11 +96,7 @@ export default function Home() {
 
   useEffect(() => {
     if (user && !isUserLoading) {
-      if (user.email?.toLowerCase() === "anthony@iqmeeteq.com") {
-        setLocation("/admin");
-      } else {
-        setLocation("/chat");
-      }
+      setLocation("/chat");
     }
   }, [user, isUserLoading, setLocation]);
 
@@ -131,13 +127,9 @@ export default function Home() {
       return;
     }
     loginMutation.mutate({ data: { email: loginEmail, password: loginPassword } }, {
-      onSuccess: (data) => {
+      onSuccess: () => {
         queryClient.invalidateQueries({ queryKey: getGetMeQueryKey() });
-        if ((data as any)?.user?.email?.toLowerCase() === "anthony@iqmeeteq.com") {
-          setLocation("/admin");
-        } else {
-          setLocation("/chat");
-        }
+        setLocation("/chat");
       },
       onError: (err: any) => {
         setLoginError(err?.message || "Invalid credentials.");

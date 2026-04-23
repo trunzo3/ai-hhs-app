@@ -20,6 +20,27 @@ function requireAdmin(req: any, res: any, next: any): void {
   next();
 }
 
+router.post("/admin/login", (req, res): void => {
+  const { email, password } = req.body ?? {};
+  const adminEmail = process.env.ADMIN_EMAIL;
+  const adminPassword = process.env.ADMIN_PASSWORD;
+
+  if (!adminEmail || !adminPassword) {
+    res.status(500).json({ error: "Admin credentials not configured on server." });
+    return;
+  }
+
+  if (
+    typeof email === "string" && typeof password === "string" &&
+    email.toLowerCase() === adminEmail.toLowerCase() &&
+    password === adminPassword
+  ) {
+    res.json({ ok: true });
+  } else {
+    res.status(401).json({ ok: false, error: "Invalid admin credentials." });
+  }
+});
+
 router.get("/admin/stats", requireAdmin, async (req, res): Promise<void> => {
   try {
     const now = new Date();

@@ -87,22 +87,30 @@ export default function Admin() {
 
   useEffect(() => {
     const auth = sessionStorage.getItem("adminAuth");
-    if (auth === "true") { setAdminAuthenticated(true); setIsAuthenticated(true); setIsCheckingAuth(false); return; }
-    fetch("/api/auth/me").then(async (res) => {
-      if (res.ok) {
-        const data = await res.json();
-        if (data?.email?.toLowerCase() === "anthony@iqmeeteq.com") {
-          sessionStorage.setItem("adminAuth", "true"); setAdminAuthenticated(true); setIsAuthenticated(true);
-        }
-      }
-    }).catch(() => {}).finally(() => setIsCheckingAuth(false));
+    if (auth === "true") { setAdminAuthenticated(true); setIsAuthenticated(true); }
+    setIsCheckingAuth(false);
   }, []);
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (loginEmail.toLowerCase() === "anthony@iqmeeteq.com" && loginPassword === "95682") {
-      sessionStorage.setItem("adminAuth", "true"); setAdminAuthenticated(true); setIsAuthenticated(true);
-    } else { setLoginError("Invalid admin credentials."); }
+    setLoginError("");
+    try {
+      const res = await fetch("/api/admin/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: loginEmail, password: loginPassword }),
+      });
+      const data = await res.json();
+      if (res.ok && data.ok) {
+        sessionStorage.setItem("adminAuth", "true");
+        setAdminAuthenticated(true);
+        setIsAuthenticated(true);
+      } else {
+        setLoginError(data.error ?? "Invalid admin credentials.");
+      }
+    } catch {
+      setLoginError("Could not reach the server. Please try again.");
+    }
   };
 
   const handleLogout = () => { sessionStorage.removeItem("adminAuth"); setAdminAuthenticated(false); window.location.href = "/"; };
