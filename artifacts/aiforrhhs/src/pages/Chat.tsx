@@ -20,7 +20,7 @@ type Message = {
   fileAttached?: string; // filename or type label
 };
 
-const TASK_LAUNCHERS_FALLBACK = [
+const TASK_LAUNCHERS = [
   { title: "Break down an ACL or policy letter", desc: "Upload a document and get a plain-language summary" },
   { title: "Draft an email to my team", desc: "Describe the message and I'll write the first draft" },
   { title: "Prep for a difficult conversation", desc: "Plan your approach and anticipate responses" },
@@ -30,8 +30,6 @@ const TASK_LAUNCHERS_FALLBACK = [
   { title: "Simplify a policy for my staff", desc: "Turn jargon into language your team can use" },
   { title: "Brainstorm solutions to a problem", desc: "Generate options and think through approaches" },
 ];
-
-type TaskCardData = { title: string; desc: string };
 
 const OPENING_MESSAGE =
   "This tool is built for HHS work. You don't need to know how to prompt — just tell me what you're trying to get done, and I'll walk you through it. Pick a task below, or describe what's on your plate.";
@@ -76,10 +74,6 @@ export default function Chat() {
   const [gitEmail, setGitEmail] = useState("");
   const [gitSubmitting, setGitSubmitting] = useState(false);
 
-  const [showSecurityModal, setShowSecurityModal] = useState(false);
-
-  const [taskCards, setTaskCards] = useState<TaskCardData[]>(TASK_LAUNCHERS_FALLBACK);
-
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -103,30 +97,6 @@ export default function Chat() {
   useEffect(() => {
     if (user && !conversationId && !startConvMutation.isPending) handleNewChat();
   }, [user, conversationId]);
-
-  useEffect(() => {
-    let cancelled = false;
-    fetch("/api/chat/task-cards")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((rows) => {
-        if (cancelled || !Array.isArray(rows) || rows.length === 0) return;
-        setTaskCards(rows.map((r: any) => ({ title: r.title, desc: r.description })));
-      })
-      .catch(() => { /* keep fallback */ });
-    return () => { cancelled = true; };
-  }, []);
-
-  useEffect(() => {
-    if (!showSecurityModal && !showGetInTouchModal) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        setShowSecurityModal(false);
-        setShowGetInTouchModal(false);
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [showSecurityModal, showGetInTouchModal]);
 
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
@@ -379,8 +349,8 @@ export default function Chat() {
           <button onClick={handleNewChat} style={{ background: "transparent", border: "1px solid #C8963E", color: "#C8963E", borderRadius: 6, fontSize: 13, padding: "5px 14px", cursor: "pointer", fontFamily: "'DM Sans', sans-serif" }} data-testid="btn-new-chat">New chat</button>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-          <button onClick={() => { setGitEmail(user?.email ?? ""); setShowGetInTouchModal(true); }} style={{ background: "transparent", border: "none", color: "#7B8CA3", fontSize: 15, cursor: "pointer", fontFamily: "'DM Sans', sans-serif", padding: "5px 0" }} data-testid="btn-get-in-touch">Get in touch</button>
-          <button onClick={logout} style={{ background: "none", border: "none", color: "#7B8CA3", fontSize: 15, cursor: "pointer", fontFamily: "'DM Sans', sans-serif", padding: "5px 0" }} data-testid="btn-logout">Log out</button>
+          <button onClick={() => { setGitEmail(user?.email ?? ""); setShowGetInTouchModal(true); }} style={{ background: "transparent", border: "none", color: "#7B8CA3", fontSize: 13, cursor: "pointer", fontFamily: "'DM Sans', sans-serif", padding: "5px 0" }} data-testid="btn-get-in-touch">Get in touch</button>
+          <button onClick={logout} style={{ background: "none", border: "none", color: "#7B8CA3", fontSize: 13, cursor: "pointer", fontFamily: "'DM Sans', sans-serif", padding: "5px 0" }} data-testid="btn-logout">Log out</button>
         </div>
       </header>
       {/* ── CHAT AREA ── */}
@@ -450,7 +420,7 @@ export default function Chat() {
           {isInitialState && (
             <>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 24 }}>
-                {taskCards.map((task, i) => (
+                {TASK_LAUNCHERS.map((task, i) => (
                   <TaskCard key={i} title={task.title} desc={task.desc} onClick={() => sendMessage(task.title, true)} testId={`btn-task-${i}`} />
                 ))}
               </div>
@@ -467,13 +437,8 @@ export default function Chat() {
       {/* ── INPUT BAR ── */}
       <div style={{ flexShrink: 0, background: "#FFFFFF", borderTop: "1.5px solid #CCCCCC", padding: "12px 16px 14px" }}>
         <div style={{ maxWidth: 720, margin: "0 auto" }}>
-          <div style={{ textAlign: "center", marginBottom: 10, lineHeight: 1.45 }}>
-            <div style={{ fontSize: 16, fontWeight: 400, color: "#C8963E" }}>
-              AI for HHS never stores your conversations.
-            </div>
-            <div style={{ fontSize: 16, fontWeight: 700, color: "#B91C1C", marginTop: 2 }}>
-              When you close this chat, it's gone.
-            </div>
+          <div style={{ textAlign: "center", marginBottom: 8 }}>
+            <span style={{ fontSize: 12, color: "#1A2744", letterSpacing: "0.01em" }}>AI for HHS never stores your conversations. When you close this chat, it's gone.</span>
           </div>
           {fileError && (
             <div style={{ marginBottom: 10, padding: "10px 14px", background: "#FEE2E2", color: "#DC2626", borderRadius: 8, fontSize: 13, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
@@ -514,8 +479,8 @@ export default function Chat() {
               </button>
             )}
           </div>
-          <div style={{ textAlign: "center", marginTop: 10 }}>
-            <SecurityPill onClick={() => setShowSecurityModal(true)} />
+          <div style={{ textAlign: "center", marginTop: 6 }}>
+            <span style={{ fontSize: 10, color: "#6B7280" }}>{isStreaming ? "Generating — Enter is paused · Shift+Enter for new line." : "Enter to send · Shift+Enter for new line."}</span>
           </div>
         </div>
       </div>
@@ -523,8 +488,7 @@ export default function Chat() {
       {/* ── GET IN TOUCH MODAL ── */}
       {showGetInTouchModal && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }} onClick={(e) => { if (e.target === e.currentTarget) setShowGetInTouchModal(false); }}>
-          <div style={{ background: "#fff", borderRadius: 12, maxWidth: 500, width: "100%", padding: "28px 28px 24px", boxShadow: "0 16px 48px rgba(0,0,0,0.2)", fontFamily: "'DM Sans', sans-serif", position: "relative" }}>
-            <ModalCloseButton onClick={() => setShowGetInTouchModal(false)} testId="btn-close-get-in-touch" />
+          <div style={{ background: "#fff", borderRadius: 12, maxWidth: 500, width: "100%", padding: "28px 28px 24px", boxShadow: "0 16px 48px rgba(0,0,0,0.2)", fontFamily: "'DM Sans', sans-serif" }}>
             <h2 style={{ fontFamily: "'DM Serif Display', serif", fontSize: 22, color: "#1A2744", margin: "0 0 8px" }}>Get in touch</h2>
             <p style={{ fontSize: 13, color: "#6B7280", margin: "0 0 22px", lineHeight: 1.6 }}>Whether you want training for your team, help with a project, or want to share feedback about the tool — I'd love to hear from you.</p>
 
@@ -577,86 +541,7 @@ export default function Chat() {
           </div>
         </div>
       )}
-
-      {/* ── SECURITY MODAL ── */}
-      {showSecurityModal && (
-        <div
-          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.65)", zIndex: 1100, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}
-          onClick={(e) => { if (e.target === e.currentTarget) setShowSecurityModal(false); }}
-          data-testid="modal-security"
-        >
-          <div style={{ position: "relative", background: "#0F1A2E", borderRadius: 14, width: "100%", maxWidth: 1180, height: "90vh", boxShadow: "0 24px 80px rgba(0,0,0,0.5)", overflow: "hidden", border: "1px solid #2A3A50" }}>
-            <ModalCloseButton onClick={() => setShowSecurityModal(false)} testId="btn-close-security" />
-            <iframe
-              src="/security-continuum.html"
-              title="AI Data Security Continuum"
-              style={{ width: "100%", height: "100%", border: "none", display: "block", background: "#0F1A2E" }}
-              data-testid="iframe-security"
-            />
-          </div>
-        </div>
-      )}
     </div>
-  );
-}
-
-function ModalCloseButton({ onClick, testId }: { onClick: () => void; testId: string }) {
-  const [hovered, setHovered] = useState(false);
-  return (
-    <button
-      onClick={onClick}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-      aria-label="Close"
-      style={{
-        position: "absolute",
-        top: 14,
-        right: 14,
-        width: 44,
-        height: 44,
-        borderRadius: "50%",
-        background: "#2A3A50",
-        border: `2px solid ${hovered ? "#C8963E" : "#7B8CA3"}`,
-        cursor: "pointer",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: 0,
-        zIndex: 10,
-        transition: "border-color 0.2s",
-      }}
-      data-testid={testId}
-    >
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-        <line x1="18" y1="6" x2="6" y2="18" />
-        <line x1="6" y1="6" x2="18" y2="18" />
-      </svg>
-    </button>
-  );
-}
-
-function SecurityPill({ onClick }: { onClick: () => void }) {
-  const [hovered, setHovered] = useState(false);
-  return (
-    <button
-      onClick={onClick}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-      style={{
-        background: hovered ? "rgba(200,150,62,0.12)" : "transparent",
-        border: "1px solid #C8963E",
-        borderRadius: 20,
-        color: "#C8963E",
-        fontSize: 14,
-        padding: "5px 18px",
-        cursor: "pointer",
-        fontFamily: "'DM Sans', sans-serif",
-        transition: "background 0.15s",
-      }}
-      data-testid="btn-security-pill"
-    >
-      Security
-    </button>
   );
 }
 
