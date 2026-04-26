@@ -1,8 +1,8 @@
 import { Router, type IRouter } from "express";
 import Anthropic from "@anthropic-ai/sdk";
 import mammoth from "mammoth";
-import { db, conversationMetadataTable, responseRatingsTable, usersTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { db, conversationMetadataTable, responseRatingsTable, usersTable, taskLauncherCardsTable } from "@workspace/db";
+import { eq, asc } from "drizzle-orm";
 import { buildSystemPromptFromDB } from "../../lib/systemPrompt";
 import { retrieveRelevantChunks } from "../../lib/rag";
 import {
@@ -39,6 +39,24 @@ function requireAuth(req: any, res: any, next: any): void {
   }
   next();
 }
+
+router.get("/chat/task-cards", async (_req, res): Promise<void> => {
+  try {
+    const rows = await db
+      .select({
+        id: taskLauncherCardsTable.id,
+        title: taskLauncherCardsTable.title,
+        description: taskLauncherCardsTable.description,
+        displayOrder: taskLauncherCardsTable.displayOrder,
+      })
+      .from(taskLauncherCardsTable)
+      .orderBy(asc(taskLauncherCardsTable.displayOrder), asc(taskLauncherCardsTable.title));
+    res.json(rows);
+  } catch (err) {
+    logger.error({ err }, "Failed to fetch task launcher cards");
+    res.status(500).json({ error: "Failed to fetch task launcher cards" });
+  }
+});
 
 router.post("/chat/conversation/start", requireAuth, async (req, res): Promise<void> => {
   const userId = (req.session as any).userId;

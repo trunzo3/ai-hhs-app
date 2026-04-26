@@ -78,7 +78,7 @@ const loginSchema = z.object({
 export default function Home() {
   const [, setLocation] = useLocation();
   const { data: user, isLoading: isUserLoading } = useGetMe({ query: { retry: false } });
-  const [mode, setMode] = useState<"register" | "login">("register");
+  const [mode, setMode] = useState<"register" | "login">("login");
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
@@ -294,8 +294,24 @@ export default function Home() {
                   Log In
                 </Button>
               </form>
-              <div className="text-center text-sm">
-                <button type="button" onClick={() => setMode("register")} className="text-primary hover:underline" data-testid="btn-switch-register">
+              <div className="text-center" style={{ marginTop: 4 }}>
+                <button
+                  type="button"
+                  onClick={() => setMode("register")}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    color: "#C8963E",
+                    fontSize: 16,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    fontFamily: "'DM Sans', sans-serif",
+                    padding: "4px 8px",
+                  }}
+                  onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.textDecoration = "underline")}
+                  onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.textDecoration = "none")}
+                  data-testid="btn-switch-register"
+                >
                   Need an account? Register
                 </button>
               </div>
