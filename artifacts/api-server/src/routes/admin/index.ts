@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import { spawn } from "child_process";
-import { db, usersTable, conversationMetadataTable, responseRatingsTable, feedbackTable, inquiriesTable, appConfigTable, tokenUsageTable, corpusDocumentsTable, systemPromptsTable } from "@workspace/db";
-import { eq, count, avg, desc, and } from "drizzle-orm";
+import { db, usersTable, conversationMetadataTable, responseRatingsTable, feedbackTable, inquiriesTable, appConfigTable, tokenUsageTable, corpusDocumentsTable, systemPromptsTable, taskLauncherCardsTable } from "@workspace/db";
+import { eq, count, avg, desc, and, asc } from "drizzle-orm";
 import { sql } from "drizzle-orm";
 import { getActiveModel, getSpendThreshold, getCurrentMonthSpend } from "../../lib/tokenTracker";
 import { ingestDocument } from "../../lib/rag";
@@ -343,6 +343,49 @@ router.get("/admin/trends", requireAdmin, async (req, res): Promise<void> => {
   } catch (err) {
     req.log.error({ err }, "Failed to fetch trends");
     res.status(500).json({ error: "Failed to fetch trends" });
+  }
+});
+
+router.get("/admin/task-cards", requireAdmin, async (req, res): Promise<void> => {
+  try {
+    const rows = await db.select().from(taskLauncherCardsTable).orderBy(asc(taskLauncherCardsTable.displayOrder), asc(taskLauncherCardsTable.title));
+    res.json(rows.map((r) => ({
+      id: r.id,
+      title: r.title,
+      description: r.description,
+      displayOrder: r.displayOrder,
+      updatedAt: r.updatedAt?.toISOString() ?? null,
+    })));
+  } catch (err) {
+    req.log.error({ err }, "Failed to fetch task launcher cards");
+    res.status(500).json({ error: "Failed to fetch task launcher cards" });
+  }
+});
+
+router.patch("/admin/task-cards/:id", requireAdmin, async (req, res): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const { title, description, displayOrder } = req.body ?? {};
+    const update: any = { updatedAt: new Date() };
+    if (typeof title === "string" && title.trim()) update.title = title.trim();
+    if (typeof description === "string") update.description = description;
+    if (typeof displayOrder === "number" && Number.isInteger(displayOrder) && displayOrder >= 1 && displayOrder <= 8) {
+      update.displayOrder = displayOrder;
+    }
+    if (Object.keys(update).length === 1) {
+      res.status(400).json({ error: "No valid fields to update" });
+      return;
+    }
+    await db.update(taskLauncherCardsTable).set(update).where(eq(taskLauncherCardsTable.id, id));
+    const [updated] = await db.select().from(taskLauncherCardsTable).where(eq(taskLauncherCardsTable.id, id));
+    if (!updated) { res.status(404).json({ error: "Card not found" }); return; }
+    res.json({
+      id: updated.id, title: updated.title, description: updated.description,
+      displayOrder: updated.displayOrder, updatedAt: updated.updatedAt?.toISOString() ?? null,
+    });
+  } catch (err) {
+    req.log.error({ err }, "Failed to update task launcher card");
+    res.status(500).json({ error: "Failed to update card" });
   }
 });
 

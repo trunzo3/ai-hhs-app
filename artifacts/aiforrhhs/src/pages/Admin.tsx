@@ -205,6 +205,15 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
   const [viewModal, setViewModal] = useState<{ docId: string; title: string; content: string } | null>(null);
   const [viewLoading, setViewLoading] = useState(false);
 
+  /* ── Task launcher cards state ── */
+  type TaskCard = { id: string; title: string; description: string; displayOrder: number; updatedAt: string | null };
+  const [taskCards, setTaskCards] = useState<TaskCard[]>([]);
+  const [taskCardDrafts, setTaskCardDrafts] = useState<Record<string, { title: string; description: string; displayOrder: number }>>({});
+  const [taskCardsFetched, setTaskCardsFetched] = useState(false);
+  const [taskCardsLoading, setTaskCardsLoading] = useState(false);
+  const [taskCardSavingId, setTaskCardSavingId] = useState<string | null>(null);
+  const [taskCardError, setTaskCardError] = useState<string | null>(null);
+
   /* ── System prompt state ── */
   const [spLayers, setSPLayers] = useState<SPLayer[]>([]);
   const [spFetched, setSPFetched] = useState(false);
@@ -245,6 +254,44 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
     setCorpusLoading(false);
   }, []);
 
+  const fetchTaskCards = useCallback(async () => {
+    setTaskCardsLoading(true); setTaskCardError(null);
+    try {
+      const res = await fetch("/api/admin/task-cards");
+      if (!res.ok) throw new Error("Failed");
+      const cards: TaskCard[] = await res.json();
+      setTaskCards(cards);
+      const drafts: Record<string, { title: string; description: string; displayOrder: number }> = {};
+      cards.forEach((c) => { drafts[c.id] = { title: c.title, description: c.description, displayOrder: c.displayOrder }; });
+      setTaskCardDrafts(drafts);
+      setTaskCardsFetched(true);
+    } catch { setTaskCardError("Failed to load task launcher cards."); }
+    setTaskCardsLoading(false);
+  }, []);
+
+  const handleSaveTaskCard = async (id: string) => {
+    const draft = taskCardDrafts[id];
+    if (!draft) return;
+    if (!draft.title.trim()) { setTaskCardError("Title cannot be empty."); return; }
+    if (!Number.isInteger(draft.displayOrder) || draft.displayOrder < 1 || draft.displayOrder > 8) {
+      setTaskCardError("Display order must be an integer between 1 and 8."); return;
+    }
+    setTaskCardSavingId(id); setTaskCardError(null);
+    try {
+      const res = await fetch(`/api/admin/task-cards/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: draft.title.trim(), description: draft.description, displayOrder: draft.displayOrder }),
+      });
+      if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || "Save failed"); }
+      const updated: TaskCard = await res.json();
+      setTaskCards((prev) => prev.map((c) => (c.id === id ? updated : c)).sort((a, b) => a.displayOrder - b.displayOrder));
+    } catch (err: any) {
+      setTaskCardError(err?.message ?? "Save failed.");
+    }
+    setTaskCardSavingId(null);
+  };
+
   const fetchSP = useCallback(async () => {
     setSPLoading(true);
     try {
@@ -264,8 +311,9 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
     if (activeTab === "settings") {
       if (!corpusFetched) fetchCorpus();
       if (!spFetched) fetchSP();
+      if (!taskCardsFetched) fetchTaskCards();
     }
-  }, [activeTab, corpusFetched, spFetched, fetchCorpus, fetchSP]);
+  }, [activeTab, corpusFetched, spFetched, taskCardsFetched, fetchCorpus, fetchSP, fetchTaskCards]);
 
   const handleModelChange = async (model: string) => {
     if (!stats) return;
@@ -815,7 +863,85 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
               <input ref={replaceInputRef} type="file" accept=".md,.txt" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; if (f) handleReplaceDoc(f); if (replaceInputRef.current) replaceInputRef.current.value = ""; }} />
             </div>
 
-            {/* 3. System Prompt */}
+            {/* 3. Task Launcher Cards */}
+            <div style={cardStyle}>
+              <div style={sectionTitleStyle}>Task Launcher Cards</div>
+              <p style={{ fontSize: 13, color: "#6B7280", margin: "-8px 0 20px", lineHeight: 1.6 }}>
+                These are the eight task suggestion cards shown to users at the start of every new conversation. Edit the title, subtitle, or grid position. Display order 1–8 controls placement (1 = top-left, 8 = bottom-right). Changes take effect on the next page load for users.
+              </p>
+
+              {taskCardError && (
+                <div style={{ padding: "10px 14px", background: "#FEF2F2", borderRadius: 8, marginBottom: 16, fontSize: 13, color: "#DC2626" }}>{taskCardError}</div>
+              )}
+
+              {taskCardsLoading && !taskCardsFetched ? (
+                <div style={{ display: "flex", alignItems: "center", gap: 8, color: "#6B7280", fontSize: 13 }}><Spinner size={16} color="#9CA3AF" /> Loading…</div>
+              ) : taskCards.length === 0 ? (
+                <p style={{ fontSize: 13, color: "#9CA3AF", margin: 0 }}>No task launcher cards found.</p>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                  {taskCards.map((card) => {
+                    const draft = taskCardDrafts[card.id] ?? { title: card.title, description: card.description, displayOrder: card.displayOrder };
+                    const isDirty = draft.title !== card.title || draft.description !== card.description || draft.displayOrder !== card.displayOrder;
+                    const isSaving = taskCardSavingId === card.id;
+                    return (
+                      <div key={card.id} style={{ background: "#F9FAFB", border: "1px solid #E5E7EB", borderRadius: 8, padding: "14px 18px" }} data-testid={`task-card-row-${card.id}`}>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 110px", gap: 12, alignItems: "flex-end" }}>
+                          <div>
+                            <label style={labelStyle}>Title</label>
+                            <input
+                              type="text"
+                              value={draft.title}
+                              onChange={(e) => setTaskCardDrafts((prev) => ({ ...prev, [card.id]: { ...draft, title: e.target.value } }))}
+                              style={{ ...inputStyle("100%"), padding: "8px 10px" }}
+                              data-testid={`input-task-title-${card.id}`}
+                            />
+                          </div>
+                          <div>
+                            <label style={labelStyle}>Description</label>
+                            <input
+                              type="text"
+                              value={draft.description}
+                              onChange={(e) => setTaskCardDrafts((prev) => ({ ...prev, [card.id]: { ...draft, description: e.target.value } }))}
+                              style={{ ...inputStyle("100%"), padding: "8px 10px" }}
+                              data-testid={`input-task-desc-${card.id}`}
+                            />
+                          </div>
+                          <div>
+                            <label style={labelStyle}>Display Order</label>
+                            <input
+                              type="number"
+                              min={1}
+                              max={8}
+                              value={draft.displayOrder}
+                              onChange={(e) => setTaskCardDrafts((prev) => ({ ...prev, [card.id]: { ...draft, displayOrder: parseInt(e.target.value, 10) || 1 } }))}
+                              style={{ ...inputStyle("100%"), padding: "8px 10px" }}
+                              data-testid={`input-task-order-${card.id}`}
+                            />
+                          </div>
+                        </div>
+                        <div style={{ display: "flex", gap: 10, marginTop: 12, alignItems: "center" }}>
+                          <button
+                            onClick={() => handleSaveTaskCard(card.id)}
+                            disabled={!isDirty || isSaving}
+                            style={btnStyle("#1A2744", !isDirty || isSaving)}
+                            data-testid={`btn-save-task-${card.id}`}
+                          >
+                            {isSaving ? "Saving…" : "Save changes"}
+                          </button>
+                          {isDirty && !isSaving && <span style={{ fontSize: 12, color: "#F59E0B" }}>Unsaved changes</span>}
+                          {!isDirty && card.updatedAt && (
+                            <span style={{ fontSize: 11, color: "#9CA3AF" }}>Last saved: {new Date(card.updatedAt).toLocaleString()}</span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* 4. System Prompt */}
             <div style={cardStyle}>
               <div style={sectionTitleStyle}>System Prompt</div>
               <p style={{ fontSize: 13, color: "#6B7280", margin: "-8px 0 20px" }}>
