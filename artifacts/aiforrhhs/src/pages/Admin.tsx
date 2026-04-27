@@ -213,6 +213,10 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
   const [taskCardsLoading, setTaskCardsLoading] = useState(false);
   const [taskCardSavingId, setTaskCardSavingId] = useState<string | null>(null);
   const [taskCardError, setTaskCardError] = useState<string | null>(null);
+  const [taskCardAdding, setTaskCardAdding] = useState(false);
+  const [deletingTaskCard, setDeletingTaskCard] = useState<TaskCard | null>(null);
+  const [deleteTaskCardText, setDeleteTaskCardText] = useState("");
+  const [deletingTaskCardSubmitting, setDeletingTaskCardSubmitting] = useState(false);
 
   /* ── System prompt state ── */
   const [spLayers, setSPLayers] = useState<SPLayer[]>([]);
@@ -269,12 +273,15 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
     setTaskCardsLoading(false);
   }, []);
 
+  const sortTaskCards = (cards: TaskCard[]) =>
+    [...cards].sort((a, b) => a.displayOrder - b.displayOrder || a.title.localeCompare(b.title));
+
   const handleSaveTaskCard = async (id: string) => {
     const draft = taskCardDrafts[id];
     if (!draft) return;
     if (!draft.title.trim()) { setTaskCardError("Title cannot be empty."); return; }
-    if (!Number.isInteger(draft.displayOrder) || draft.displayOrder < 1 || draft.displayOrder > 8) {
-      setTaskCardError("Display order must be an integer between 1 and 8."); return;
+    if (!Number.isInteger(draft.displayOrder) || draft.displayOrder < 1) {
+      setTaskCardError("Display order must be a whole number of 1 or greater."); return;
     }
     setTaskCardSavingId(id); setTaskCardError(null);
     try {
@@ -285,11 +292,49 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
       });
       if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || "Save failed"); }
       const updated: TaskCard = await res.json();
-      setTaskCards((prev) => prev.map((c) => (c.id === id ? updated : c)).sort((a, b) => a.displayOrder - b.displayOrder));
+      setTaskCards((prev) => sortTaskCards(prev.map((c) => (c.id === id ? updated : c))));
+      setTaskCardDrafts((prev) => ({ ...prev, [updated.id]: { title: updated.title, description: updated.description, displayOrder: updated.displayOrder } }));
     } catch (err: any) {
       setTaskCardError(err?.message ?? "Save failed.");
     }
     setTaskCardSavingId(null);
+  };
+
+  const handleAddTaskCard = async () => {
+    setTaskCardAdding(true); setTaskCardError(null);
+    try {
+      // Server assigns displayOrder = max(existing) + 1 in a single transaction,
+      // so we don't send a client-computed order (avoids races on rapid clicks).
+      const res = await fetch(`/api/admin/task-cards`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: "New card", description: "" }),
+      });
+      if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || "Add failed"); }
+      const created: TaskCard = await res.json();
+      setTaskCards((prev) => sortTaskCards([...prev, created]));
+      setTaskCardDrafts((prev) => ({ ...prev, [created.id]: { title: created.title, description: created.description, displayOrder: created.displayOrder } }));
+    } catch (err: any) {
+      setTaskCardError(err?.message ?? "Add failed.");
+    }
+    setTaskCardAdding(false);
+  };
+
+  const handleConfirmDeleteTaskCard = async () => {
+    if (!deletingTaskCard || deleteTaskCardText !== "delete") return;
+    const card = deletingTaskCard;
+    setDeletingTaskCardSubmitting(true); setTaskCardError(null);
+    try {
+      const res = await fetch(`/api/admin/task-cards/${card.id}`, { method: "DELETE" });
+      if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || "Delete failed"); }
+      setTaskCards((prev) => sortTaskCards(prev.filter((c) => c.id !== card.id)));
+      setTaskCardDrafts((prev) => { const next = { ...prev }; delete next[card.id]; return next; });
+      setDeletingTaskCard(null);
+      setDeleteTaskCardText("");
+    } catch (err: any) {
+      setTaskCardError(err?.message ?? "Delete failed.");
+    }
+    setDeletingTaskCardSubmitting(false);
   };
 
   const fetchSP = useCallback(async () => {
@@ -865,9 +910,19 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
 
             {/* 3. Task Launcher Cards */}
             <div style={cardStyle}>
-              <div style={sectionTitleStyle}>Task Launcher Cards</div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16 }}>
+                <div style={sectionTitleStyle}>Task Launcher Cards</div>
+                <button
+                  onClick={handleAddTaskCard}
+                  disabled={taskCardAdding}
+                  style={btnStyle("#C8963E", taskCardAdding)}
+                  data-testid="btn-add-task-card"
+                >
+                  {taskCardAdding ? "Adding…" : "+ Add card"}
+                </button>
+              </div>
               <p style={{ fontSize: 13, color: "#6B7280", margin: "-8px 0 20px", lineHeight: 1.6 }}>
-                These are the eight task suggestion cards shown to users at the start of every new conversation. Edit the title, subtitle, or grid position. Display order 1–8 controls placement (1 = top-left, 8 = bottom-right). Changes take effect on the next page load for users.
+                These are the task suggestion cards shown to users at the start of every new conversation. Edit the title, subtitle, or grid position. Lower display order numbers appear first (1 = top-left). Only the eight cards with the lowest display order are shown to users; any extras are hidden in the chat but still editable here. Changes take effect on the next page load for users.
               </p>
 
               {taskCardError && (
@@ -877,15 +932,21 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
               {taskCardsLoading && !taskCardsFetched ? (
                 <div style={{ display: "flex", alignItems: "center", gap: 8, color: "#6B7280", fontSize: 13 }}><Spinner size={16} color="#9CA3AF" /> Loading…</div>
               ) : taskCards.length === 0 ? (
-                <p style={{ fontSize: 13, color: "#9CA3AF", margin: 0 }}>No task launcher cards found.</p>
+                <p style={{ fontSize: 13, color: "#9CA3AF", margin: 0 }}>No task launcher cards yet. Click "Add card" to create the first one.</p>
               ) : (
                 <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-                  {taskCards.map((card) => {
+                  {taskCards.map((card, idx) => {
                     const draft = taskCardDrafts[card.id] ?? { title: card.title, description: card.description, displayOrder: card.displayOrder };
                     const isDirty = draft.title !== card.title || draft.description !== card.description || draft.displayOrder !== card.displayOrder;
                     const isSaving = taskCardSavingId === card.id;
+                    const isHiddenFromChat = idx >= 8;
                     return (
                       <div key={card.id} style={{ background: "#F9FAFB", border: "1px solid #E5E7EB", borderRadius: 8, padding: "14px 18px" }} data-testid={`task-card-row-${card.id}`}>
+                        {isHiddenFromChat && (
+                          <div style={{ fontSize: 11, fontWeight: 600, color: "#92400E", background: "#FEF3C7", padding: "2px 8px", borderRadius: 4, marginBottom: 8, display: "inline-block" }}>
+                            Hidden from chat (only the 8 lowest display orders are shown)
+                          </div>
+                        )}
                         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 110px", gap: 12, alignItems: "flex-end" }}>
                           <div>
                             <label style={labelStyle}>Title</label>
@@ -912,7 +973,6 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
                             <input
                               type="number"
                               min={1}
-                              max={8}
                               value={draft.displayOrder}
                               onChange={(e) => setTaskCardDrafts((prev) => ({ ...prev, [card.id]: { ...draft, displayOrder: parseInt(e.target.value, 10) || 1 } }))}
                               style={{ ...inputStyle("100%"), padding: "8px 10px" }}
@@ -920,7 +980,7 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
                             />
                           </div>
                         </div>
-                        <div style={{ display: "flex", gap: 10, marginTop: 12, alignItems: "center" }}>
+                        <div style={{ display: "flex", gap: 10, marginTop: 12, alignItems: "center", flexWrap: "wrap" }}>
                           <button
                             onClick={() => handleSaveTaskCard(card.id)}
                             disabled={!isDirty || isSaving}
@@ -928,6 +988,14 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
                             data-testid={`btn-save-task-${card.id}`}
                           >
                             {isSaving ? "Saving…" : "Save changes"}
+                          </button>
+                          <button
+                            onClick={() => { setDeletingTaskCard(card); setDeleteTaskCardText(""); }}
+                            disabled={isSaving}
+                            style={btnStyle("#DC2626", isSaving)}
+                            data-testid={`btn-delete-task-${card.id}`}
+                          >
+                            Delete
                           </button>
                           {isDirty && !isSaving && <span style={{ fontSize: 12, color: "#F59E0B" }}>Unsaved changes</span>}
                           {!isDirty && card.updatedAt && (
@@ -940,6 +1008,53 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
                 </div>
               )}
             </div>
+
+            {deletingTaskCard && (
+              <div
+                style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 16 }}
+                onClick={() => { if (!deletingTaskCardSubmitting) { setDeletingTaskCard(null); setDeleteTaskCardText(""); } }}
+              >
+                <div
+                  style={{ background: "#fff", borderRadius: 12, padding: "28px 32px", maxWidth: 460, width: "100%", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <h3 style={{ fontFamily: "'DM Serif Display', serif", fontSize: 22, color: "#1A2744", margin: "0 0 10px" }}>Delete task launcher card?</h3>
+                  <p style={{ fontSize: 13, color: "#4B5563", margin: "0 0 6px", lineHeight: 1.55 }}>
+                    You're about to permanently delete <strong>"{deletingTaskCard.title}"</strong>. This can't be undone.
+                  </p>
+                  <p style={{ fontSize: 13, color: "#4B5563", margin: "12px 0 6px" }}>
+                    Type <strong>delete</strong> to confirm.
+                  </p>
+                  <input
+                    type="text"
+                    value={deleteTaskCardText}
+                    onChange={(e) => setDeleteTaskCardText(e.target.value)}
+                    placeholder="delete"
+                    autoFocus
+                    style={{ ...inputStyle("100%"), padding: "9px 12px", marginBottom: 16 }}
+                    data-testid="input-confirm-delete-task-card"
+                  />
+                  <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+                    <button
+                      onClick={() => { setDeletingTaskCard(null); setDeleteTaskCardText(""); }}
+                      disabled={deletingTaskCardSubmitting}
+                      style={{ background: "#fff", color: "#4B5563", border: "1px solid #D1D5DB", borderRadius: 6, padding: "8px 16px", fontSize: 14, cursor: deletingTaskCardSubmitting ? "not-allowed" : "pointer", fontFamily: "'DM Sans', sans-serif" }}
+                      data-testid="btn-cancel-delete-task-card"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={handleConfirmDeleteTaskCard}
+                      disabled={deleteTaskCardText !== "delete" || deletingTaskCardSubmitting}
+                      style={btnStyle("#DC2626", deleteTaskCardText !== "delete" || deletingTaskCardSubmitting)}
+                      data-testid="btn-confirm-delete-task-card"
+                    >
+                      {deletingTaskCardSubmitting ? "Deleting…" : "Delete card"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* 4. System Prompt */}
             <div style={cardStyle}>

@@ -50,7 +50,8 @@ router.get("/chat/task-cards", async (_req, res): Promise<void> => {
         displayOrder: taskLauncherCardsTable.displayOrder,
       })
       .from(taskLauncherCardsTable)
-      .orderBy(asc(taskLauncherCardsTable.displayOrder), asc(taskLauncherCardsTable.title));
+      .orderBy(asc(taskLauncherCardsTable.displayOrder), asc(taskLauncherCardsTable.title))
+      .limit(8);
     res.json(rows);
   } catch (err) {
     logger.error({ err }, "Failed to fetch task launcher cards");

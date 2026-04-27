@@ -362,6 +362,35 @@ router.get("/admin/task-cards", requireAdmin, async (req, res): Promise<void> =>
   }
 });
 
+router.post("/admin/task-cards", requireAdmin, async (req, res): Promise<void> => {
+  try {
+    const { title, description } = req.body ?? {};
+    const trimmedTitle = typeof title === "string" ? title.trim() : "";
+    if (!trimmedTitle) { res.status(400).json({ error: "Title is required" }); return; }
+    const desc = typeof description === "string" ? description : "";
+
+    // Display order is always assigned server-side as max(existing) + 1.
+    // The new card lands at the end of the list, hidden from chat (since chat
+    // shows only the lowest 8). Admin can re-order via PATCH after creation.
+    const [created] = await db.transaction(async (tx) => {
+      const [{ maxOrder }] = await tx
+        .select({ maxOrder: sql<number>`COALESCE(MAX(${taskLauncherCardsTable.displayOrder}), 0)::int` })
+        .from(taskLauncherCardsTable);
+      return tx
+        .insert(taskLauncherCardsTable)
+        .values({ title: trimmedTitle, description: desc, displayOrder: (maxOrder ?? 0) + 1 })
+        .returning();
+    });
+    res.status(201).json({
+      id: created.id, title: created.title, description: created.description,
+      displayOrder: created.displayOrder, updatedAt: created.updatedAt?.toISOString() ?? null,
+    });
+  } catch (err) {
+    req.log.error({ err }, "Failed to create task launcher card");
+    res.status(500).json({ error: "Failed to create card" });
+  }
+});
+
 router.patch("/admin/task-cards/:id", requireAdmin, async (req, res): Promise<void> => {
   try {
     const { id } = req.params;
@@ -369,7 +398,7 @@ router.patch("/admin/task-cards/:id", requireAdmin, async (req, res): Promise<vo
     const update: any = { updatedAt: new Date() };
     if (typeof title === "string" && title.trim()) update.title = title.trim();
     if (typeof description === "string") update.description = description;
-    if (typeof displayOrder === "number" && Number.isInteger(displayOrder) && displayOrder >= 1 && displayOrder <= 8) {
+    if (typeof displayOrder === "number" && Number.isInteger(displayOrder) && displayOrder >= 1) {
       update.displayOrder = displayOrder;
     }
     if (Object.keys(update).length === 1) {
@@ -386,6 +415,18 @@ router.patch("/admin/task-cards/:id", requireAdmin, async (req, res): Promise<vo
   } catch (err) {
     req.log.error({ err }, "Failed to update task launcher card");
     res.status(500).json({ error: "Failed to update card" });
+  }
+});
+
+router.delete("/admin/task-cards/:id", requireAdmin, async (req, res): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const result = await db.delete(taskLauncherCardsTable).where(eq(taskLauncherCardsTable.id, id)).returning({ id: taskLauncherCardsTable.id });
+    if (result.length === 0) { res.status(404).json({ error: "Card not found" }); return; }
+    res.json({ success: true });
+  } catch (err) {
+    req.log.error({ err }, "Failed to delete task launcher card");
+    res.status(500).json({ error: "Failed to delete card" });
   }
 });
 

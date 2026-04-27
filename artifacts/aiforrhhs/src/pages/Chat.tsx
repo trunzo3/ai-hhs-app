@@ -20,17 +20,6 @@ type Message = {
   fileAttached?: string; // filename or type label
 };
 
-const TASK_LAUNCHERS_FALLBACK = [
-  { title: "Break down an ACL or policy letter", desc: "Upload a document and get a plain-language summary" },
-  { title: "Draft an email to my team", desc: "Describe the message and I'll write the first draft" },
-  { title: "Prep for a difficult conversation", desc: "Plan your approach and anticipate responses" },
-  { title: "Summarize a long document", desc: "Get key takeaways from reports, policies, or data" },
-  { title: "Get feedback on something I wrote", desc: "Paste your draft and get specific critique" },
-  { title: "Build a case for change", desc: "Structure a persuasive pitch for leadership" },
-  { title: "Simplify a policy for my staff", desc: "Turn jargon into language your team can use" },
-  { title: "Brainstorm solutions to a problem", desc: "Generate options and think through approaches" },
-];
-
 type TaskCardData = { title: string; desc: string };
 
 const OPENING_MESSAGE =
@@ -78,7 +67,7 @@ export default function Chat() {
 
   const [showSecurityModal, setShowSecurityModal] = useState(false);
 
-  const [taskCards, setTaskCards] = useState<TaskCardData[]>(TASK_LAUNCHERS_FALLBACK);
+  const [taskCards, setTaskCards] = useState<TaskCardData[]>([]);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -109,10 +98,10 @@ export default function Chat() {
     fetch("/api/chat/task-cards")
       .then((r) => (r.ok ? r.json() : null))
       .then((rows) => {
-        if (cancelled || !Array.isArray(rows) || rows.length === 0) return;
+        if (cancelled || !Array.isArray(rows)) return;
         setTaskCards(rows.map((r: any) => ({ title: r.title, desc: r.description })));
       })
-      .catch(() => { /* keep fallback */ });
+      .catch(() => { /* on error, leave taskCards empty */ });
     return () => { cancelled = true; };
   }, []);
 
