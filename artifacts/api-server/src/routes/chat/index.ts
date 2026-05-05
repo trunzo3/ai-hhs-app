@@ -148,11 +148,20 @@ router.post("/chat/message", requireAuth, async (req, res): Promise<void> => {
   const forcedChunks: RetrievedChunk[] = forcedDocIds.length > 0
     ? await getAllChunksForDocs(forcedDocIds)
     : [];
-  const ragChunks: RetrievedChunk[] = await retrieveRelevantChunksWithScores(message, undefined, forcedDocIds);
-  const ragContext = [...forcedChunks, ...ragChunks].map((c) => c.content);
-
+  // Define taskChainPrompt BEFORE RAG so it can be used for boost.
   const taskChainPrompt = boundCard?.taskChainPrompt && boundCard.taskChainPrompt.trim() ? boundCard.taskChainPrompt : null;
   const taskLauncherTitle = boundCard?.title ?? (typeof taskLauncher === "string" ? taskLauncher : null);
+
+  // RAG boost: when a task card has a task chain prompt, append it to the
+  // user's message before embedding. This steers retrieval toward corpus
+  // documents relevant to the task — critical for turns where the user's
+  // message is empty or just a file attachment.
+  const rawMessage = typeof message === "string" ? message : "";
+  const ragQuery = taskChainPrompt
+    ? `${rawMessage} ${taskChainPrompt}`.trim()
+    : rawMessage;
+  const ragChunks: RetrievedChunk[] = await retrieveRelevantChunksWithScores(ragQuery, undefined, forcedDocIds);
+  const ragContext = [...forcedChunks, ...ragChunks].map((c) => c.content);
 
   const systemPrompt = await buildSystemPromptFromDB({
     ragContext,
@@ -183,7 +192,7 @@ router.post("/chat/message", requireAuth, async (req, res): Promise<void> => {
         conversationId,
         userId: user.id,
         userEmail: user.email,
-        query: typeof message === "string" ? message.slice(0, 2000) : "",
+        query: ragQuery.slice(0, 2000),
         chunks: tagged,
       });
     }

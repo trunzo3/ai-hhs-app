@@ -1,0 +1,86 @@
+# Replit Prompt: RAG Boost
+
+## Problem
+
+When a user clicks a task launcher card and then uploads a file with little or no typed text, the RAG similarity search has nothing meaningful to query on. The retrieval runs on the user's message text only — which might be an empty string or something like "here it is." The corpus documents that contain the methodology for that task don't get retrieved on the turn that matters most.
+
+The task chain prompt — which IS in context via the card binding — tells the AI to "follow the instructions in the reference material," but the reference material isn't there because RAG couldn't find it.
+
+## Solution: RAG Boost
+
+When a conversation is bound to a task card that has a `taskChainPrompt`, concatenate the task chain prompt text with the user's message before running the RAG similarity search. This steers the embedding toward corpus documents relevant to the task, even when the user's message is empty or brief.
+
+RAG boost activates automatically for any card that has a task chain prompt. Cards without one behave exactly as before. There is no per-card toggle — the presence of a task chain prompt IS the toggle.
+
+## What to change
+
+### Change 1: Move `taskChainPrompt` definition and build boosted query
+
+**File: `artifacts/api-server/src/routes/chat/index.ts`**
+
+Currently, `taskChainPrompt` is defined AFTER the RAG retrieval call. It needs to be moved BEFORE it so the boost query can use it.
+
+Find these lines (they appear after the force-injection block):
+
+```typescript
+const ragChunks: RetrievedChunk[] = await retrieveRelevantChunksWithScores(message, undefined, forcedDocIds);
+const ragContext = [...forcedChunks, ...ragChunks].map((c) => c.content);
+
+const taskChainPrompt = boundCard?.taskChainPrompt && boundCard.taskChainPrompt.trim() ? boundCard.taskChainPrompt : null;
+const taskLauncherTitle = boundCard?.title ?? (typeof taskLauncher === "string" ? taskLauncher : null);
+```
+
+Rewrite them as:
+
+```typescript
+// Define taskChainPrompt BEFORE RAG so it can be used for boost.
+const taskChainPrompt = boundCard?.taskChainPrompt && boundCard.taskChainPrompt.trim() ? boundCard.taskChainPrompt : null;
+const taskLauncherTitle = boundCard?.title ?? (typeof taskLauncher === "string" ? taskLauncher : null);
+
+// RAG boost: when a task card has a task chain prompt, append it to the
+// user's message before embedding. This steers retrieval toward corpus
+// documents relevant to the task — critical for turns where the user's
+// message is empty or just a file attachment.
+const rawMessage = typeof message === "string" ? message : "";
+const ragQuery = taskChainPrompt
+  ? `${rawMessage} ${taskChainPrompt}`.trim()
+  : rawMessage;
+const ragChunks: RetrievedChunk[] = await retrieveRelevantChunksWithScores(ragQuery, undefined, forcedDocIds);
+const ragContext = [...forcedChunks, ...ragChunks].map((c) => c.content);
+```
+
+Make sure `taskChainPrompt` and `taskLauncherTitle` are NOT defined again later in the function — they were just moved up, not duplicated.
+
+### Change 2: Store boosted query in retrieval debug log
+
+In the same file, find the debug logging block (the section that starts with `const debugOn = await getDebugRetrievalLogging()`). The `query` field currently stores the raw user message. Change it to store the actual RAG query that was used for embedding, so the admin can see why specific chunks were retrieved.
+
+Find:
+```typescript
+query: typeof message === "string" ? message.slice(0, 2000) : "",
+```
+
+Change to:
+```typescript
+query: ragQuery.slice(0, 2000),
+```
+
+The `ragQuery` variable is now in scope because it was defined earlier in the function.
+
+## What NOT to change
+
+- Do not modify `rag.ts` — it already accepts a query string and returns scored chunks. The boost happens at the call site.
+- Do not modify the system prompt assembly — the task chain prompt still goes into the `TASK CONTEXT` block as before. RAG boost is about what gets embedded for retrieval, not what gets shown to the model.
+- Do not modify the admin UI — there is no per-card toggle for RAG boost. It activates automatically whenever a card has a task chain prompt.
+- Do not modify the schema — no new columns or tables needed.
+
+## Verification
+
+1. Open the admin panel → Settings → Retrieval Debug and toggle logging ON
+2. Find a card that has a task chain prompt (e.g., "Distill an ACL") in the Task Launcher Cards section
+3. In a separate browser tab, log in as a user, click that card, then upload a file with NO typed message
+4. Go back to admin → Retrieval Debug → Refresh
+5. The most recent entry should show:
+   - The `query` field contains the task chain prompt text (not an empty string)
+   - The retrieved chunks are from methodology corpus documents relevant to that task
+6. Compare: create a new chat, DON'T click a card, just type "here's a document" — the retrieval should return different (less relevant) chunks because there's no task chain prompt to boost with
