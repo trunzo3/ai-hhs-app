@@ -85,6 +85,9 @@ Key tables (managed via Drizzle ORM):
 - **Domain matching:** On registration, email domain is checked against `.gov`, `.ca.gov`, `.ca.us`, `.org`, `.edu` patterns. Non-matching domains require a connection explanation.
 - **Disabled accounts:** Admin can disable users; disabled users see a paused message on login attempt
 - **Admin auth:** Hardcoded credentials (anthony@iqmeeteq.com / 95682), accessed via gear icon on login page — completely separate session/cookie from user sessions
+- **Self-service password reset:** 2-step verify (email → county+service-category match) at `/api/auth/forgot-password/verify`. On success issues a 32-byte crypto-random token (base64url) whose SHA-256 hash is stored in `users.reset_token` with a 1-hour expiry. User completes flow at `/reset-password?token=...`. Tokens are single-use and never stored in plaintext. Failed verify attempts are tracked in `password_reset_attempts` with an atomic SQL upsert (sliding 1-hour window); 3 failures lock the email for 1 hour. Generic mismatch error never reveals whether the email exists.
+- **Admin-issued reset:** From Users tab, admin can generate a copyable reset URL for any user (same hashed-token mechanism).
+- **Configurable support email:** `app_config.support_email` (default `anthony@iqmeeteq.com`) is surfaced via public `GET /api/auth/support-email` and embedded in lockout/error messages so the contact stays in sync.
 
 ### RAG Pipeline
 
@@ -94,19 +97,20 @@ Key tables (managed via Drizzle ORM):
 
 ### System Prompt Architecture
 
-The system prompt is split into 4 layers stored in the database (editable via admin):
+The system prompt is split into 4 layers stored in the database (editable via admin), plus an optional 5th task-chain layer:
 1. **Layer 1:** Identity & Tone
 2. **Layer 2:** Methodology (RICECO, Six Ways, Power Follow-Ups, Red/Yellow/Green, Peer Review)
 3. **Layer 3:** RAG Context (injected dynamically per request)
 4. **Layer 4:** User Context (county, service category injected per user)
+5. **Layer 5 (optional):** Task-chain prompt — when a chat originates from a task launcher card, the per-card `task_chain_prompt` (admin-editable column on `task_launcher_cards`) is appended. Replaces the previously hardcoded `TASK_CHAINS` map in `systemPrompt.ts`.
 
 ### Admin Dashboard
 
 Tabbed interface at `/admin`:
 - **Inbox** — "Get in Touch" inquiries + file upload errors/feedback
 - **Dashboard** — Summary cards, sparkline trend charts, breakdowns by county/service category, task launcher rankings, unmatched domain registrations
-- **Users** — Filterable/sortable user table, enable/disable accounts
-- **Settings** — Model controls (active model + spend threshold), corpus document management, system prompt editor with diff view before saving
+- **Users** — Filterable/sortable user table, enable/disable accounts, generate password-reset URL per user
+- **Settings** — Model controls (active model + spend threshold + support contact email), corpus document management with on-demand "Test retrieval" panel, task launcher card editor (title/description/task-chain prompt per card), system prompt editor with diff view before saving, retrieval debug section (toggle on to log every chat retrieval to `retrieval_debug_log` — query + chunks + scores — viewable in admin)
 
 ---
 

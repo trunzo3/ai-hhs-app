@@ -1,13 +1,15 @@
 import { Router, type IRouter } from "express";
 import { spawn } from "child_process";
-import { db, usersTable, conversationMetadataTable, responseRatingsTable, feedbackTable, inquiriesTable, appConfigTable, tokenUsageTable, corpusDocumentsTable, systemPromptsTable, taskLauncherCardsTable } from "@workspace/db";
+import { db, usersTable, conversationMetadataTable, responseRatingsTable, feedbackTable, inquiriesTable, appConfigTable, tokenUsageTable, corpusDocumentsTable, systemPromptsTable, taskLauncherCardsTable, retrievalDebugLogTable } from "@workspace/db";
 import { eq, count, avg, desc, and, asc } from "drizzle-orm";
 import { sql } from "drizzle-orm";
 import { getActiveModel, getSpendThreshold, getCurrentMonthSpend } from "../../lib/tokenTracker";
-import { ingestDocument } from "../../lib/rag";
+import { ingestDocument, retrieveRelevantChunksWithScores } from "../../lib/rag";
 import { invalidateSystemPromptCache, LAYER_1_IDENTITY, LAYER_2_METHODOLOGY, LAYER_3_RAG_PREAMBLE, LAYER_4_USER_CONTEXT } from "../../lib/systemPrompt";
 import { UpdateAdminConfigBody } from "@workspace/api-zod";
 import { logger } from "../../lib/logger";
+import { getSupportEmail, setSupportEmail, getDebugRetrievalLogging, setDebugRetrievalLogging } from "../../lib/appConfig";
+import { generateResetToken } from "../../lib/auth";
 
 const router: IRouter = Router();
 
@@ -286,23 +288,121 @@ router.get("/admin/config", requireAdmin, async (req, res): Promise<void> => {
   const activeModel = await getActiveModel();
   const spendThreshold = await getSpendThreshold();
   const { spend, tokens } = await getCurrentMonthSpend();
-  res.json({ activeModel, spendThreshold, currentMonthSpend: spend, currentMonthTokens: tokens });
+  const supportEmail = await getSupportEmail();
+  const debugRetrievalLogging = await getDebugRetrievalLogging();
+  res.json({ activeModel, spendThreshold, currentMonthSpend: spend, currentMonthTokens: tokens, supportEmail, debugRetrievalLogging });
 });
 
 router.patch("/admin/config", requireAdmin, async (req, res): Promise<void> => {
+  // Accept extra fields beyond the codegen schema (supportEmail, debugRetrievalLogging).
+  // Validate the codegen-known fields with the schema; handle the new ones inline.
   const parsed = UpdateAdminConfigBody.safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
   const { activeModel, spendThreshold } = parsed.data;
+  const supportEmailRaw = req.body?.supportEmail;
+  const debugRetrievalLoggingRaw = req.body?.debugRetrievalLogging;
+
   if (activeModel != null) {
     await db.insert(appConfigTable).values({ key: "active_model", value: activeModel }).onConflictDoUpdate({ target: appConfigTable.key, set: { value: activeModel, updatedAt: new Date() } });
   }
   if (spendThreshold != null) {
     await db.insert(appConfigTable).values({ key: "spend_threshold", value: String(spendThreshold) }).onConflictDoUpdate({ target: appConfigTable.key, set: { value: String(spendThreshold), updatedAt: new Date() } });
   }
+  if (typeof supportEmailRaw === "string") {
+    const trimmed = supportEmailRaw.trim();
+    if (!trimmed || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(trimmed)) {
+      res.status(400).json({ error: "supportEmail must be a valid email address." });
+      return;
+    }
+    await setSupportEmail(trimmed);
+  }
+  if (typeof debugRetrievalLoggingRaw === "boolean") {
+    await setDebugRetrievalLogging(debugRetrievalLoggingRaw);
+  }
+
   const updatedModel = await getActiveModel();
   const updatedThreshold = await getSpendThreshold();
   const { spend, tokens } = await getCurrentMonthSpend();
-  res.json({ activeModel: updatedModel, spendThreshold: updatedThreshold, currentMonthSpend: spend, currentMonthTokens: tokens });
+  const supportEmail = await getSupportEmail();
+  const debugRetrievalLogging = await getDebugRetrievalLogging();
+  res.json({ activeModel: updatedModel, spendThreshold: updatedThreshold, currentMonthSpend: spend, currentMonthTokens: tokens, supportEmail, debugRetrievalLogging });
+});
+
+router.get("/admin/retrieval-debug", requireAdmin, async (req, res): Promise<void> => {
+  try {
+    const rows = await db
+      .select()
+      .from(retrievalDebugLogTable)
+      .orderBy(desc(retrievalDebugLogTable.createdAt))
+      .limit(100);
+    res.json(rows.map((r) => ({
+      id: r.id,
+      conversationId: r.conversationId,
+      userId: r.userId,
+      userEmail: r.userEmail,
+      query: r.query,
+      chunks: r.chunks,
+      createdAt: r.createdAt.toISOString(),
+    })));
+  } catch (err) {
+    req.log.error({ err }, "Failed to fetch retrieval debug log");
+    res.status(500).json({ error: "Failed to fetch retrieval debug log" });
+  }
+});
+
+router.delete("/admin/retrieval-debug", requireAdmin, async (req, res): Promise<void> => {
+  try {
+    await db.delete(retrievalDebugLogTable);
+    res.json({ success: true });
+  } catch (err) {
+    req.log.error({ err }, "Failed to clear retrieval debug log");
+    res.status(500).json({ error: "Failed to clear retrieval debug log" });
+  }
+});
+
+router.post("/admin/corpus/test-retrieval", requireAdmin, async (req, res): Promise<void> => {
+  try {
+    const query = typeof req.body?.query === "string" ? req.body.query.trim() : "";
+    const kRaw = req.body?.k;
+    const k = typeof kRaw === "number" && Number.isInteger(kRaw) ? Math.max(1, Math.min(20, kRaw)) : 5;
+    if (!query) { res.status(400).json({ error: "query is required" }); return; }
+    const chunks = await retrieveRelevantChunksWithScores(query, k);
+    res.json({
+      query,
+      k,
+      results: chunks.map((c) => ({
+        docId: c.docId,
+        title: c.title,
+        score: c.score,
+        preview: c.content.slice(0, 500),
+      })),
+    });
+  } catch (err) {
+    req.log.error({ err }, "Test retrieval failed");
+    res.status(500).json({ error: "Test retrieval failed" });
+  }
+});
+
+router.post("/admin/users/:id/reset-password", requireAdmin, async (req, res): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const [user] = await db.select().from(usersTable).where(eq(usersTable.id, id));
+    if (!user) { res.status(404).json({ error: "User not found" }); return; }
+
+    const { token, tokenHash } = generateResetToken();
+    const expires = new Date(Date.now() + 3600 * 1000);
+    await db.update(usersTable).set({ resetToken: tokenHash, resetExpires: expires }).where(eq(usersTable.id, id));
+
+    // Build reset URL using the request origin so admins get a copy-pasteable link.
+    // The raw token goes in the URL; only its hash is persisted to DB.
+    const origin = `${req.protocol}://${req.get("host")}`;
+    const resetUrl = `${origin}/reset-password?token=${encodeURIComponent(token)}`;
+
+    res.json({ success: true, resetUrl, expiresAt: expires.toISOString() });
+  } catch (err) {
+    req.log.error({ err }, "Failed to generate admin password reset");
+    res.status(500).json({ error: "Failed to generate reset link" });
+  }
 });
 
 router.get("/admin/trends", requireAdmin, async (req, res): Promise<void> => {
@@ -354,6 +454,7 @@ router.get("/admin/task-cards", requireAdmin, async (req, res): Promise<void> =>
       title: r.title,
       description: r.description,
       displayOrder: r.displayOrder,
+      taskChainPrompt: r.taskChainPrompt,
       updatedAt: r.updatedAt?.toISOString() ?? null,
     })));
   } catch (err) {
@@ -364,10 +465,11 @@ router.get("/admin/task-cards", requireAdmin, async (req, res): Promise<void> =>
 
 router.post("/admin/task-cards", requireAdmin, async (req, res): Promise<void> => {
   try {
-    const { title, description } = req.body ?? {};
+    const { title, description, taskChainPrompt } = req.body ?? {};
     const trimmedTitle = typeof title === "string" ? title.trim() : "";
     if (!trimmedTitle) { res.status(400).json({ error: "Title is required" }); return; }
     const desc = typeof description === "string" ? description : "";
+    const chainPrompt = typeof taskChainPrompt === "string" ? taskChainPrompt : null;
 
     // Display order is always assigned server-side as max(existing) + 1.
     // The new card lands at the end of the list, hidden from chat (since chat
@@ -378,12 +480,13 @@ router.post("/admin/task-cards", requireAdmin, async (req, res): Promise<void> =
         .from(taskLauncherCardsTable);
       return tx
         .insert(taskLauncherCardsTable)
-        .values({ title: trimmedTitle, description: desc, displayOrder: (maxOrder ?? 0) + 1 })
+        .values({ title: trimmedTitle, description: desc, displayOrder: (maxOrder ?? 0) + 1, taskChainPrompt: chainPrompt })
         .returning();
     });
     res.status(201).json({
       id: created.id, title: created.title, description: created.description,
-      displayOrder: created.displayOrder, updatedAt: created.updatedAt?.toISOString() ?? null,
+      displayOrder: created.displayOrder, taskChainPrompt: created.taskChainPrompt,
+      updatedAt: created.updatedAt?.toISOString() ?? null,
     });
   } catch (err) {
     req.log.error({ err }, "Failed to create task launcher card");
@@ -394,12 +497,16 @@ router.post("/admin/task-cards", requireAdmin, async (req, res): Promise<void> =
 router.patch("/admin/task-cards/:id", requireAdmin, async (req, res): Promise<void> => {
   try {
     const { id } = req.params;
-    const { title, description, displayOrder } = req.body ?? {};
+    const { title, description, displayOrder, taskChainPrompt } = req.body ?? {};
     const update: any = { updatedAt: new Date() };
     if (typeof title === "string" && title.trim()) update.title = title.trim();
     if (typeof description === "string") update.description = description;
     if (typeof displayOrder === "number" && Number.isInteger(displayOrder) && displayOrder >= 1) {
       update.displayOrder = displayOrder;
+    }
+    // taskChainPrompt: accept string (set/replace) or explicit null (clear).
+    if (typeof taskChainPrompt === "string" || taskChainPrompt === null) {
+      update.taskChainPrompt = taskChainPrompt === null ? null : taskChainPrompt;
     }
     if (Object.keys(update).length === 1) {
       res.status(400).json({ error: "No valid fields to update" });
@@ -410,7 +517,8 @@ router.patch("/admin/task-cards/:id", requireAdmin, async (req, res): Promise<vo
     if (!updated) { res.status(404).json({ error: "Card not found" }); return; }
     res.json({
       id: updated.id, title: updated.title, description: updated.description,
-      displayOrder: updated.displayOrder, updatedAt: updated.updatedAt?.toISOString() ?? null,
+      displayOrder: updated.displayOrder, taskChainPrompt: updated.taskChainPrompt,
+      updatedAt: updated.updatedAt?.toISOString() ?? null,
     });
   } catch (err) {
     req.log.error({ err }, "Failed to update task launcher card");

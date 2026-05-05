@@ -1,4 +1,5 @@
 import argon2 from "argon2";
+import crypto from "node:crypto";
 
 export async function hashPassword(password: string): Promise<string> {
   return argon2.hash(password);
@@ -19,6 +20,17 @@ export function checkDomainMatch(email: string): boolean {
   );
 }
 
-export function generateResetToken(): string {
-  return Math.random().toString(36).substring(2) + Date.now().toString(36);
+/**
+ * Generate a cryptographically secure password-reset token.
+ * Returns the raw token (sent to user via URL) and a SHA-256 hash (stored in DB).
+ * Compare hashes on the reset endpoint — never store the raw token.
+ */
+export function generateResetToken(): { token: string; tokenHash: string } {
+  const token = crypto.randomBytes(32).toString("base64url");
+  const tokenHash = hashResetToken(token);
+  return { token, tokenHash };
+}
+
+export function hashResetToken(token: string): string {
+  return crypto.createHash("sha256").update(token).digest("hex");
 }

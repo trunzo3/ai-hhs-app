@@ -10,6 +10,17 @@ type AdminStats = {
   unmatchedDomainCount: number; usersByCounty: Array<{ label: string; count: number }>;
   usersByServiceCategory: Array<{ label: string; count: number }>; taskLauncherUsage: Array<{ label: string; count: number }>;
   activeModel: string; spendThreshold: number;
+  supportEmail?: string; debugRetrievalLogging?: boolean;
+};
+type RetrievalDebugEntry = {
+  id: string; conversationId: string | null; userId: string | null; userEmail: string | null;
+  query: string; chunks: Array<{ docId: string; title: string; score: number; preview: string }>;
+  createdAt: string;
+};
+type TestRetrievalResult = { docId: string; title: string; score: number; preview: string };
+type AdminConfig = {
+  activeModel: string; spendThreshold: number; currentMonthSpend: number; currentMonthTokens: number;
+  supportEmail: string; debugRetrievalLogging: boolean;
 };
 type AdminUser = {
   id: string; email: string; county: string; serviceCategory: string; domainMatch: boolean;
@@ -206,9 +217,9 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
   const [viewLoading, setViewLoading] = useState(false);
 
   /* ── Task launcher cards state ── */
-  type TaskCard = { id: string; title: string; description: string; displayOrder: number; updatedAt: string | null };
+  type TaskCard = { id: string; title: string; description: string; displayOrder: number; taskChainPrompt: string | null; updatedAt: string | null };
   const [taskCards, setTaskCards] = useState<TaskCard[]>([]);
-  const [taskCardDrafts, setTaskCardDrafts] = useState<Record<string, { title: string; description: string; displayOrder: number }>>({});
+  const [taskCardDrafts, setTaskCardDrafts] = useState<Record<string, { title: string; description: string; displayOrder: number; taskChainPrompt: string }>>({});
   const [taskCardsFetched, setTaskCardsFetched] = useState(false);
   const [taskCardsLoading, setTaskCardsLoading] = useState(false);
   const [taskCardSavingId, setTaskCardSavingId] = useState<string | null>(null);
@@ -217,6 +228,30 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
   const [deletingTaskCard, setDeletingTaskCard] = useState<TaskCard | null>(null);
   const [deleteTaskCardText, setDeleteTaskCardText] = useState("");
   const [deletingTaskCardSubmitting, setDeletingTaskCardSubmitting] = useState(false);
+
+  /* ── Retrieval debug + test retrieval state ── */
+  const [retrievalDebug, setRetrievalDebug] = useState<RetrievalDebugEntry[]>([]);
+  const [retrievalDebugLoading, setRetrievalDebugLoading] = useState(false);
+  const [retrievalDebugFetched, setRetrievalDebugFetched] = useState(false);
+  const [retrievalDebugError, setRetrievalDebugError] = useState<string | null>(null);
+  const [debugLoggingEnabled, setDebugLoggingEnabled] = useState<boolean>(false);
+  const [debugLoggingSaving, setDebugLoggingSaving] = useState(false);
+  const [testRetrievalQuery, setTestRetrievalQuery] = useState("");
+  const [testRetrievalK, setTestRetrievalK] = useState<number>(5);
+  const [testRetrievalResults, setTestRetrievalResults] = useState<TestRetrievalResult[] | null>(null);
+  const [testRetrievalLoading, setTestRetrievalLoading] = useState(false);
+  const [testRetrievalError, setTestRetrievalError] = useState<string | null>(null);
+
+  /* ── Support email state ── */
+  const [supportEmailInput, setSupportEmailInput] = useState("");
+  const [supportEmailSaving, setSupportEmailSaving] = useState(false);
+  const [supportEmailError, setSupportEmailError] = useState<string | null>(null);
+
+  /* ── User reset password modal state ── */
+  const [resetUserModal, setResetUserModal] = useState<{ user: AdminUser; resetUrl: string; expiresAt: string } | null>(null);
+  const [resetUserLoadingId, setResetUserLoadingId] = useState<string | null>(null);
+  const [resetUserError, setResetUserError] = useState<string | null>(null);
+  const [resetUrlCopied, setResetUrlCopied] = useState(false);
 
   /* ── System prompt state ── */
   const [spLayers, setSPLayers] = useState<SPLayer[]>([]);
@@ -265,8 +300,8 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
       if (!res.ok) throw new Error("Failed");
       const cards: TaskCard[] = await res.json();
       setTaskCards(cards);
-      const drafts: Record<string, { title: string; description: string; displayOrder: number }> = {};
-      cards.forEach((c) => { drafts[c.id] = { title: c.title, description: c.description, displayOrder: c.displayOrder }; });
+      const drafts: Record<string, { title: string; description: string; displayOrder: number; taskChainPrompt: string }> = {};
+      cards.forEach((c) => { drafts[c.id] = { title: c.title, description: c.description, displayOrder: c.displayOrder, taskChainPrompt: c.taskChainPrompt ?? "" }; });
       setTaskCardDrafts(drafts);
       setTaskCardsFetched(true);
     } catch { setTaskCardError("Failed to load task launcher cards."); }
@@ -285,15 +320,21 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
     }
     setTaskCardSavingId(id); setTaskCardError(null);
     try {
+      const trimmedChain = draft.taskChainPrompt.trim();
       const res = await fetch(`/api/admin/task-cards/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: draft.title.trim(), description: draft.description, displayOrder: draft.displayOrder }),
+        body: JSON.stringify({
+          title: draft.title.trim(),
+          description: draft.description,
+          displayOrder: draft.displayOrder,
+          taskChainPrompt: trimmedChain.length > 0 ? trimmedChain : null,
+        }),
       });
       if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || "Save failed"); }
       const updated: TaskCard = await res.json();
       setTaskCards((prev) => sortTaskCards(prev.map((c) => (c.id === id ? updated : c))));
-      setTaskCardDrafts((prev) => ({ ...prev, [updated.id]: { title: updated.title, description: updated.description, displayOrder: updated.displayOrder } }));
+      setTaskCardDrafts((prev) => ({ ...prev, [updated.id]: { title: updated.title, description: updated.description, displayOrder: updated.displayOrder, taskChainPrompt: updated.taskChainPrompt ?? "" } }));
     } catch (err: any) {
       setTaskCardError(err?.message ?? "Save failed.");
     }
@@ -308,12 +349,12 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
       const res = await fetch(`/api/admin/task-cards`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: "New card", description: "" }),
+        body: JSON.stringify({ title: "New card", description: "", taskChainPrompt: null }),
       });
       if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || "Add failed"); }
       const created: TaskCard = await res.json();
       setTaskCards((prev) => sortTaskCards([...prev, created]));
-      setTaskCardDrafts((prev) => ({ ...prev, [created.id]: { title: created.title, description: created.description, displayOrder: created.displayOrder } }));
+      setTaskCardDrafts((prev) => ({ ...prev, [created.id]: { title: created.title, description: created.description, displayOrder: created.displayOrder, taskChainPrompt: created.taskChainPrompt ?? "" } }));
     } catch (err: any) {
       setTaskCardError(err?.message ?? "Add failed.");
     }
@@ -351,14 +392,38 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
     setSPLoading(false);
   }, []);
 
+  const fetchRetrievalDebug = useCallback(async () => {
+    setRetrievalDebugLoading(true); setRetrievalDebugError(null);
+    try {
+      const res = await fetch("/api/admin/retrieval-debug");
+      if (!res.ok) throw new Error("Failed");
+      setRetrievalDebug(await res.json());
+      setRetrievalDebugFetched(true);
+    } catch { setRetrievalDebugError("Failed to load retrieval debug log."); }
+    setRetrievalDebugLoading(false);
+  }, []);
+
+  const fetchAdminConfig = useCallback(async () => {
+    try {
+      const res = await fetch("/api/admin/config");
+      if (!res.ok) return;
+      const cfg: AdminConfig = await res.json();
+      setSupportEmailInput(cfg.supportEmail ?? "");
+      setDebugLoggingEnabled(!!cfg.debugRetrievalLogging);
+      setStats((prev) => prev ? { ...prev, supportEmail: cfg.supportEmail, debugRetrievalLogging: cfg.debugRetrievalLogging } : prev);
+    } catch { /* silent */ }
+  }, []);
+
   useEffect(() => { fetchAll(); }, [fetchAll]);
   useEffect(() => {
     if (activeTab === "settings") {
       if (!corpusFetched) fetchCorpus();
       if (!spFetched) fetchSP();
       if (!taskCardsFetched) fetchTaskCards();
+      fetchAdminConfig();
+      if (!retrievalDebugFetched) fetchRetrievalDebug();
     }
-  }, [activeTab, corpusFetched, spFetched, taskCardsFetched, fetchCorpus, fetchSP, fetchTaskCards]);
+  }, [activeTab, corpusFetched, spFetched, taskCardsFetched, retrievalDebugFetched, fetchCorpus, fetchSP, fetchTaskCards, fetchAdminConfig, fetchRetrievalDebug]);
 
   const handleModelChange = async (model: string) => {
     if (!stats) return;
@@ -406,6 +471,100 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
   const handleToggleDisabled = async (userId: string, disabled: boolean) => {
     setUsers((prev) => prev.map((u) => u.id === userId ? { ...u, disabled } : u));
     await fetch(`/api/admin/users/${userId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ disabled }) });
+  };
+
+  const handleGenerateUserReset = async (user: AdminUser) => {
+    setResetUserLoadingId(user.id); setResetUserError(null); setResetUrlCopied(false);
+    try {
+      const res = await fetch(`/api/admin/users/${user.id}/reset-password`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to generate reset link");
+      setResetUserModal({ user, resetUrl: data.resetUrl, expiresAt: data.expiresAt });
+    } catch (err: any) {
+      setResetUserError(err?.message ?? "Failed to generate reset link.");
+    }
+    setResetUserLoadingId(null);
+  };
+
+  const handleCopyResetUrl = async () => {
+    if (!resetUserModal) return;
+    try {
+      await navigator.clipboard.writeText(resetUserModal.resetUrl);
+      setResetUrlCopied(true);
+      setTimeout(() => setResetUrlCopied(false), 2000);
+    } catch { /* silent */ }
+  };
+
+  const handleSaveSupportEmail = async () => {
+    const trimmed = supportEmailInput.trim();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(trimmed)) {
+      setSupportEmailError("Please enter a valid email address."); return;
+    }
+    setSupportEmailSaving(true); setSupportEmailError(null);
+    try {
+      const res = await fetch("/api/admin/config", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ supportEmail: trimmed }),
+      });
+      if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || "Save failed"); }
+      const cfg: AdminConfig = await res.json();
+      setSupportEmailInput(cfg.supportEmail);
+      setStats((prev) => prev ? { ...prev, supportEmail: cfg.supportEmail } : prev);
+    } catch (err: any) {
+      setSupportEmailError(err?.message ?? "Save failed.");
+    }
+    setSupportEmailSaving(false);
+  };
+
+  const handleToggleDebugLogging = async (enabled: boolean) => {
+    setDebugLoggingSaving(true);
+    const previous = debugLoggingEnabled;
+    setDebugLoggingEnabled(enabled);
+    try {
+      const res = await fetch("/api/admin/config", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ debugRetrievalLogging: enabled }),
+      });
+      if (!res.ok) throw new Error("Failed");
+      const cfg: AdminConfig = await res.json();
+      setDebugLoggingEnabled(!!cfg.debugRetrievalLogging);
+      setStats((prev) => prev ? { ...prev, debugRetrievalLogging: cfg.debugRetrievalLogging } : prev);
+    } catch {
+      setDebugLoggingEnabled(previous);
+    }
+    setDebugLoggingSaving(false);
+  };
+
+  const handleClearRetrievalDebug = async () => {
+    if (!confirm("Clear all retrieval debug log entries? This cannot be undone.")) return;
+    try {
+      const res = await fetch("/api/admin/retrieval-debug", { method: "DELETE" });
+      if (!res.ok) throw new Error("Failed");
+      setRetrievalDebug([]);
+    } catch {
+      setRetrievalDebugError("Failed to clear log.");
+    }
+  };
+
+  const handleRunTestRetrieval = async () => {
+    const q = testRetrievalQuery.trim();
+    if (!q) return;
+    setTestRetrievalLoading(true); setTestRetrievalError(null); setTestRetrievalResults(null);
+    try {
+      const res = await fetch("/api/admin/corpus/test-retrieval", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: q, k: testRetrievalK }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Test failed");
+      setTestRetrievalResults(data.results);
+    } catch (err: any) {
+      setTestRetrievalError(err?.message ?? "Test failed.");
+    }
+    setTestRetrievalLoading(false);
   };
 
   /* ── Corpus handlers ── */
@@ -691,7 +850,7 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
             </div>
             <div style={{ overflowX: "auto" }}>
               <table style={tblStyle}>
-                <thead><tr><TH label="Email" field="email" /><TH label="Domain" field="domain" /><TH label="County" field="county" /><TH label="Service Category" field="serviceCategory" /><TH label="Registered" field="createdAt" /><TH label="Last Active" field="lastActive" /><TH label="Conversations" field="conversationCount" /><TH label="Match" field="match" /><TH label="Status" field="status" /></tr></thead>
+                <thead><tr><TH label="Email" field="email" /><TH label="Domain" field="domain" /><TH label="County" field="county" /><TH label="Service Category" field="serviceCategory" /><TH label="Registered" field="createdAt" /><TH label="Last Active" field="lastActive" /><TH label="Conversations" field="conversationCount" /><TH label="Match" field="match" /><TH label="Status" field="status" /><th style={{ padding: "10px 14px", fontSize: 11, fontWeight: 600, color: "#6B7280", borderBottom: "1px solid #E5E7EB", whiteSpace: "nowrap", background: "#FAFAFA" }}>Actions</th></tr></thead>
                 <tbody>
                   {sortedUsers.map((u) => (
                     <tr key={u.id} style={{ background: u.disabled ? "#FEF2F2" : "transparent" }}>
@@ -704,11 +863,64 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
                       <TD style={{ textAlign: "center" }}>{u.conversationCount}</TD>
                       <TD>{u.domainMatch ? <span style={{ background: "#D1FAE5", color: "#065F46", fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 10 }}>Yes</span> : <span style={{ background: "#FEE2E2", color: "#991B1B", fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 10 }}>No</span>}</TD>
                       <TD><ToggleSwitch enabled={!u.disabled} onChange={(v) => handleToggleDisabled(u.id, !v)} /></TD>
+                      <TD>
+                        <button
+                          onClick={() => handleGenerateUserReset(u)}
+                          disabled={resetUserLoadingId === u.id}
+                          style={smallBtn("#1A2744")}
+                          data-testid={`btn-reset-password-${u.id}`}
+                        >
+                          {resetUserLoadingId === u.id ? "…" : "Reset password"}
+                        </button>
+                      </TD>
                     </tr>
                   ))}
-                  {sortedUsers.length === 0 && <tr><td colSpan={9} style={{ padding: 20, textAlign: "center", color: "#9CA3AF", fontSize: 13 }}>No users match your filters</td></tr>}
+                  {sortedUsers.length === 0 && <tr><td colSpan={10} style={{ padding: 20, textAlign: "center", color: "#9CA3AF", fontSize: 13 }}>No users match your filters</td></tr>}
                 </tbody>
               </table>
+            </div>
+            {resetUserError && <div style={{ marginTop: 10, padding: "8px 12px", background: "#FEF2F2", color: "#DC2626", borderRadius: 6, fontSize: 13 }}>{resetUserError}</div>}
+          </div>
+        )}
+
+        {/* Reset password URL modal */}
+        {resetUserModal && (
+          <div
+            style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 16 }}
+            onClick={() => setResetUserModal(null)}
+          >
+            <div
+              style={{ background: "#fff", borderRadius: 12, padding: "28px 32px", maxWidth: 560, width: "100%", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}
+              onClick={(e) => e.stopPropagation()}
+              data-testid="reset-user-modal"
+            >
+              <h3 style={{ fontFamily: "'DM Serif Display', serif", fontSize: 22, color: "#1A2744", margin: "0 0 10px" }}>Password reset link</h3>
+              <p style={{ fontSize: 13, color: "#4B5563", margin: "0 0 14px", lineHeight: 1.55 }}>
+                Share this single-use link with <strong>{resetUserModal.user.email}</strong>. It expires {new Date(resetUserModal.expiresAt).toLocaleString()}.
+              </p>
+              <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+                <input
+                  type="text"
+                  readOnly
+                  value={resetUserModal.resetUrl}
+                  onFocus={(e) => e.currentTarget.select()}
+                  style={{ ...inputStyle("100%"), padding: "9px 12px", fontFamily: "monospace", fontSize: 12 }}
+                  data-testid="input-reset-url"
+                />
+                <button
+                  onClick={handleCopyResetUrl}
+                  style={btnStyle(resetUrlCopied ? "#16A34A" : "#1A2744")}
+                  data-testid="btn-copy-reset-url"
+                >
+                  {resetUrlCopied ? "Copied!" : "Copy"}
+                </button>
+              </div>
+              <div style={{ padding: "10px 14px", background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 6, fontSize: 12, color: "#92400E", marginBottom: 16, lineHeight: 1.5 }}>
+                Anyone with this link can set a new password for this account. Send it through a secure channel and don't share it publicly.
+              </div>
+              <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                <button onClick={() => setResetUserModal(null)} style={btnStyle("#6B7280")} data-testid="btn-close-reset-modal">Close</button>
+              </div>
             </div>
           </div>
         )}
@@ -821,6 +1033,29 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
                   </div>
                   <div style={hintStyle}>Downgrades to Sonnet when exceeded, resets on 1st of month</div>
                 </div>
+                <div style={{ minWidth: 280 }}>
+                  <label style={labelStyle}>Support Contact Email</label>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <input
+                      type="email"
+                      value={supportEmailInput}
+                      onChange={(e) => { setSupportEmailInput(e.target.value); setSupportEmailError(null); }}
+                      placeholder="anthony@iqmeeteq.com"
+                      style={{ ...inputStyle(240), padding: "8px 10px" }}
+                      data-testid="input-support-email"
+                    />
+                    <button
+                      onClick={handleSaveSupportEmail}
+                      disabled={supportEmailSaving}
+                      style={btnStyle("#1A2744", supportEmailSaving)}
+                      data-testid="btn-save-support-email"
+                    >
+                      {supportEmailSaving ? "Saving…" : "Save"}
+                    </button>
+                  </div>
+                  <div style={hintStyle}>Used in lockout messages, error notices, and the "Get in Touch" form</div>
+                  {supportEmailError && <div style={{ marginTop: 6, fontSize: 12, color: "#DC2626" }}>{supportEmailError}</div>}
+                </div>
               </div>
             </div>
 
@@ -906,6 +1141,62 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
               )}
 
               <input ref={replaceInputRef} type="file" accept=".md,.txt" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; if (f) handleReplaceDoc(f); if (replaceInputRef.current) replaceInputRef.current.value = ""; }} />
+
+              {/* Test retrieval */}
+              <div style={{ marginTop: 24, padding: "16px 18px", background: "#F0F9FF", border: "1px solid #BAE6FD", borderRadius: 8 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: "#0C4A6E", marginBottom: 10 }}>Test Retrieval</div>
+                <p style={{ fontSize: 12, color: "#0369A1", margin: "0 0 12px", lineHeight: 1.5 }}>Run a sample query against the corpus to see which chunks would be retrieved (no chat conversation involved). Useful for tuning content and debugging coverage.</p>
+                <div style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
+                  <div style={{ flex: 1, minWidth: 240 }}>
+                    <label style={{ ...labelStyle, color: "#0C4A6E" }}>Query</label>
+                    <input
+                      type="text"
+                      value={testRetrievalQuery}
+                      onChange={(e) => setTestRetrievalQuery(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter" && !testRetrievalLoading) handleRunTestRetrieval(); }}
+                      placeholder="e.g. How do I run a 1:1 with a struggling supervisor?"
+                      style={{ ...inputStyle("100%"), padding: "8px 10px" }}
+                      data-testid="input-test-retrieval-query"
+                    />
+                  </div>
+                  <div style={{ width: 80 }}>
+                    <label style={{ ...labelStyle, color: "#0C4A6E" }}>Top K</label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={20}
+                      value={testRetrievalK}
+                      onChange={(e) => setTestRetrievalK(Math.max(1, Math.min(20, parseInt(e.target.value, 10) || 5)))}
+                      style={{ ...inputStyle("100%"), padding: "8px 10px" }}
+                      data-testid="input-test-retrieval-k"
+                    />
+                  </div>
+                  <button
+                    onClick={handleRunTestRetrieval}
+                    disabled={testRetrievalLoading || !testRetrievalQuery.trim()}
+                    style={btnStyle("#0369A1", testRetrievalLoading || !testRetrievalQuery.trim())}
+                    data-testid="btn-test-retrieval"
+                  >
+                    {testRetrievalLoading ? "Running…" : "Run test"}
+                  </button>
+                </div>
+                {testRetrievalError && <div style={{ marginTop: 10, padding: "8px 12px", background: "#FEF2F2", color: "#DC2626", borderRadius: 6, fontSize: 12 }}>{testRetrievalError}</div>}
+                {testRetrievalResults && (
+                  <div style={{ marginTop: 14, display: "flex", flexDirection: "column", gap: 8 }} data-testid="test-retrieval-results">
+                    {testRetrievalResults.length === 0 ? (
+                      <div style={{ fontSize: 13, color: "#6B7280", fontStyle: "italic" }}>No matching chunks.</div>
+                    ) : testRetrievalResults.map((r, i) => (
+                      <div key={i} style={{ background: "#fff", border: "1px solid #E0F2FE", borderRadius: 6, padding: "10px 14px" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12, marginBottom: 6 }}>
+                          <div style={{ fontSize: 13, fontWeight: 600, color: "#0C4A6E" }}>{r.title} <span style={{ fontSize: 11, fontFamily: "monospace", color: "#9CA3AF", fontWeight: 400 }}>· {r.docId}</span></div>
+                          <div style={{ fontSize: 12, fontFamily: "monospace", color: "#0369A1", whiteSpace: "nowrap" }}>score: {r.score.toFixed(4)}</div>
+                        </div>
+                        <div style={{ fontSize: 12, color: "#374151", lineHeight: 1.5, whiteSpace: "pre-wrap" }}>{r.preview}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* 3. Task Launcher Cards */}
@@ -936,8 +1227,9 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
               ) : (
                 <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
                   {taskCards.map((card, idx) => {
-                    const draft = taskCardDrafts[card.id] ?? { title: card.title, description: card.description, displayOrder: card.displayOrder };
-                    const isDirty = draft.title !== card.title || draft.description !== card.description || draft.displayOrder !== card.displayOrder;
+                    const draft = taskCardDrafts[card.id] ?? { title: card.title, description: card.description, displayOrder: card.displayOrder, taskChainPrompt: card.taskChainPrompt ?? "" };
+                    const savedChain = card.taskChainPrompt ?? "";
+                    const isDirty = draft.title !== card.title || draft.description !== card.description || draft.displayOrder !== card.displayOrder || draft.taskChainPrompt !== savedChain;
                     const isSaving = taskCardSavingId === card.id;
                     const isHiddenFromChat = idx >= 8;
                     return (
@@ -979,6 +1271,16 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
                               data-testid={`input-task-order-${card.id}`}
                             />
                           </div>
+                        </div>
+                        <div style={{ marginTop: 12 }}>
+                          <label style={labelStyle}>Task chain prompt <span style={{ fontWeight: 400, color: "#9CA3AF" }}>(optional — appended to system prompt when this card is selected)</span></label>
+                          <textarea
+                            value={draft.taskChainPrompt}
+                            onChange={(e) => setTaskCardDrafts((prev) => ({ ...prev, [card.id]: { ...draft, taskChainPrompt: e.target.value } }))}
+                            placeholder="e.g. Walk the user through drafting the email step-by-step. Start by asking who it's for and what tone they want."
+                            style={{ width: "100%", minHeight: 90, border: "1px solid #D1D5DB", borderRadius: 6, padding: "8px 10px", fontSize: 13, color: "#111827", fontFamily: "monospace", lineHeight: 1.5, resize: "vertical", boxSizing: "border-box", outline: "none" }}
+                            data-testid={`input-task-chain-${card.id}`}
+                          />
                         </div>
                         <div style={{ display: "flex", gap: 10, marginTop: 12, alignItems: "center", flexWrap: "wrap" }}>
                           <button
@@ -1129,6 +1431,73 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
                     </div>
                   )}
                 </>
+              )}
+            </div>
+
+            {/* Retrieval Debug */}
+            <div style={cardStyle}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16, flexWrap: "wrap" }}>
+                <div>
+                  <div style={sectionTitleStyle}>Retrieval Debug</div>
+                  <p style={{ fontSize: 13, color: "#6B7280", margin: "-8px 0 0", lineHeight: 1.6, maxWidth: 620 }}>
+                    When enabled, every chat turn that uses RAG is logged with the user's query and the retrieved chunks (with cosine scores). Use this to see why the chatbot is or isn't surfacing certain knowledge. Logs are kept indefinitely until cleared.
+                  </p>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, paddingTop: 4 }}>
+                  <span style={{ fontSize: 13, color: "#374151", fontWeight: 500 }}>{debugLoggingEnabled ? "Logging on" : "Logging off"}</span>
+                  <ToggleSwitch enabled={debugLoggingEnabled} onChange={(v) => { if (!debugLoggingSaving) handleToggleDebugLogging(v); }} />
+                </div>
+              </div>
+
+              <div style={{ display: "flex", gap: 10, marginTop: 16, marginBottom: 12, alignItems: "center", flexWrap: "wrap" }}>
+                <button onClick={() => fetchRetrievalDebug()} disabled={retrievalDebugLoading} style={btnStyle("#1A2744", retrievalDebugLoading)} data-testid="btn-refresh-retrieval-debug">
+                  {retrievalDebugLoading ? "Loading…" : "Refresh"}
+                </button>
+                <button onClick={handleClearRetrievalDebug} disabled={retrievalDebug.length === 0} style={btnStyle("#DC2626", retrievalDebug.length === 0)} data-testid="btn-clear-retrieval-debug">
+                  Clear log
+                </button>
+                <span style={{ fontSize: 12, color: "#6B7280" }}>{retrievalDebug.length} entr{retrievalDebug.length === 1 ? "y" : "ies"}</span>
+              </div>
+
+              {retrievalDebugError && <div style={{ padding: "8px 12px", background: "#FEF2F2", color: "#DC2626", borderRadius: 6, fontSize: 13, marginBottom: 12 }}>{retrievalDebugError}</div>}
+
+              {retrievalDebugLoading && retrievalDebug.length === 0 ? (
+                <div style={{ display: "flex", alignItems: "center", gap: 8, color: "#6B7280", fontSize: 13 }}><Spinner size={16} color="#9CA3AF" /> Loading…</div>
+              ) : retrievalDebug.length === 0 ? (
+                <p style={{ fontSize: 13, color: "#9CA3AF", margin: 0, fontStyle: "italic" }}>
+                  {debugLoggingEnabled ? "No retrieval events logged yet. Send a chat message to populate." : "Enable logging above, then send a chat message to populate."}
+                </p>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 12, maxHeight: 600, overflowY: "auto" }} data-testid="retrieval-debug-list">
+                  {retrievalDebug.map((entry) => (
+                    <div key={entry.id} style={{ border: "1px solid #E5E7EB", borderRadius: 8, padding: "12px 14px", background: "#FAFAFA" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 8, flexWrap: "wrap" }}>
+                        <div style={{ fontSize: 12, color: "#6B7280" }}>
+                          <strong style={{ color: "#374151" }}>{entry.userEmail || "anonymous"}</strong> · {fmt(entry.createdAt)}
+                        </div>
+                        <div style={{ fontSize: 11, color: "#9CA3AF", fontFamily: "monospace" }}>{entry.id.slice(0, 8)}</div>
+                      </div>
+                      <div style={{ fontSize: 13, color: "#111827", marginBottom: 10, padding: "8px 12px", background: "#fff", borderRadius: 6, border: "1px solid #E5E7EB" }}>
+                        <span style={{ fontSize: 11, fontWeight: 600, color: "#9CA3AF", textTransform: "uppercase", letterSpacing: "0.05em" }}>Query</span>
+                        <div style={{ marginTop: 3, lineHeight: 1.5 }}>{entry.query}</div>
+                      </div>
+                      <div style={{ fontSize: 11, fontWeight: 600, color: "#9CA3AF", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>
+                        {entry.chunks.length} chunk{entry.chunks.length === 1 ? "" : "s"} retrieved
+                      </div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                        {entry.chunks.map((c, i) => (
+                          <div key={i} style={{ background: "#fff", border: "1px solid #E5E7EB", borderRadius: 6, padding: "8px 12px" }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", gap: 8, marginBottom: 4, flexWrap: "wrap" }}>
+                              <span style={{ fontSize: 12, fontWeight: 600, color: "#111827" }}>{c.title} <span style={{ fontSize: 10, fontFamily: "monospace", color: "#9CA3AF", fontWeight: 400 }}>· {c.docId}</span></span>
+                              <span style={{ fontSize: 11, fontFamily: "monospace", color: "#0369A1" }}>score: {c.score.toFixed(4)}</span>
+                            </div>
+                            <div style={{ fontSize: 12, color: "#4B5563", lineHeight: 1.5 }}>{c.preview}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
               )}
             </div>
 

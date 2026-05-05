@@ -3,10 +3,18 @@ import { eq } from "drizzle-orm";
 import { sql } from "drizzle-orm";
 import { logger } from "./logger";
 
-const OPUS_INPUT_COST = 5.0 / 1_000_000;
-const OPUS_OUTPUT_COST = 25.0 / 1_000_000;
+// Anthropic Claude 4.x pricing per million tokens — verified against
+// https://claude.com/pricing on 2026-05-05.
+// Opus 4.x: $15 input / $75 output per 1M tokens.
+// Sonnet 4.x: $3 input / $15 output per 1M tokens.
+// If pricing changes upstream, update both constants and the verification date.
+const OPUS_INPUT_COST = 15.0 / 1_000_000;
+const OPUS_OUTPUT_COST = 75.0 / 1_000_000;
 const SONNET_INPUT_COST = 3.0 / 1_000_000;
 const SONNET_OUTPUT_COST = 15.0 / 1_000_000;
+
+const DEFAULT_MODEL = "claude-opus-4-6";
+const DOWNGRADE_MODEL = "claude-sonnet-4-6";
 
 export function getCurrentMonth(): string {
   const d = new Date();
@@ -19,9 +27,9 @@ export async function getActiveModel(): Promise<string> {
       .select()
       .from(appConfigTable)
       .where(eq(appConfigTable.key, "active_model"));
-    return row?.value ?? "claude-opus-4-5";
+    return row?.value ?? DEFAULT_MODEL;
   } catch {
-    return "claude-opus-4-5";
+    return DEFAULT_MODEL;
   }
 }
 
@@ -70,10 +78,10 @@ export async function trackTokenUsage(
     if (currentCost >= threshold) {
       await db
         .insert(appConfigTable)
-        .values({ key: "active_model", value: "claude-sonnet-4-5" })
+        .values({ key: "active_model", value: DOWNGRADE_MODEL })
         .onConflictDoUpdate({
           target: appConfigTable.key,
-          set: { value: "claude-sonnet-4-5", updatedAt: new Date() },
+          set: { value: DOWNGRADE_MODEL, updatedAt: new Date() },
         });
       logger.info({ currentCost, threshold }, "Auto-downgraded to Sonnet due to spend threshold");
     }

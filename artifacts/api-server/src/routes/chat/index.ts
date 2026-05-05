@@ -1,10 +1,11 @@
 import { Router, type IRouter } from "express";
 import Anthropic from "@anthropic-ai/sdk";
 import mammoth from "mammoth";
-import { db, conversationMetadataTable, responseRatingsTable, usersTable, taskLauncherCardsTable } from "@workspace/db";
+import { db, conversationMetadataTable, responseRatingsTable, usersTable, taskLauncherCardsTable, retrievalDebugLogTable } from "@workspace/db";
 import { eq, asc } from "drizzle-orm";
 import { buildSystemPromptFromDB } from "../../lib/systemPrompt";
-import { retrieveRelevantChunks } from "../../lib/rag";
+import { retrieveRelevantChunksWithScores, type RetrievedChunk } from "../../lib/rag";
+import { getDebugRetrievalLogging } from "../../lib/appConfig";
 import {
   getHistory,
   addMessage,
@@ -87,19 +88,59 @@ router.post("/chat/message", requireAuth, async (req, res): Promise<void> => {
     return;
   }
 
-  const ragContext = await retrieveRelevantChunks(message);
+  const retrievedChunks: RetrievedChunk[] = await retrieveRelevantChunksWithScores(message);
+  const ragContext = retrievedChunks.map((c) => c.content);
+
+  // Resolve the task chain prompt from the matching launcher card (admin-editable).
+  let taskChainPrompt: string | null = null;
+  if (taskLauncher && typeof taskLauncher === "string") {
+    try {
+      const [card] = await db
+        .select({ taskChainPrompt: taskLauncherCardsTable.taskChainPrompt })
+        .from(taskLauncherCardsTable)
+        .where(eq(taskLauncherCardsTable.title, taskLauncher));
+      if (card?.taskChainPrompt && card.taskChainPrompt.trim()) {
+        taskChainPrompt = card.taskChainPrompt;
+      }
+    } catch (err) {
+      req.log.warn({ err, taskLauncher }, "Failed to load task chain prompt");
+    }
+  }
+
   const systemPrompt = await buildSystemPromptFromDB({
     ragContext,
     county: user.county,
     serviceCategory: user.serviceCategory,
     workingOutsideArea: workingOutsideArea ?? false,
     taskLauncher: taskLauncher ?? null,
+    taskChainPrompt,
   });
 
   if (taskLauncher) {
     await db.update(conversationMetadataTable)
       .set({ taskLauncherUsed: taskLauncher })
       .where(eq(conversationMetadataTable.id, conversationId));
+  }
+
+  // Optionally log retrieval for admin debug view (off by default).
+  try {
+    const debugOn = await getDebugRetrievalLogging();
+    if (debugOn) {
+      await db.insert(retrievalDebugLogTable).values({
+        conversationId,
+        userId: user.id,
+        userEmail: user.email,
+        query: typeof message === "string" ? message.slice(0, 2000) : "",
+        chunks: retrievedChunks.map((c) => ({
+          docId: c.docId,
+          title: c.title,
+          score: c.score,
+          preview: c.content.slice(0, 280),
+        })),
+      });
+    }
+  } catch (err) {
+    req.log.warn({ err }, "Failed to write retrieval debug log");
   }
 
   const userText = message.trim() || (fileBase64 ? "Document attached" : "");

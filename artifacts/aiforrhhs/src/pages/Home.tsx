@@ -89,6 +89,80 @@ export default function Home() {
   const [loginPassword, setLoginPassword] = useState("");
   const [loginError, setLoginError] = useState("");
 
+  // Forgot-password modal state
+  const [forgotOpen, setForgotOpen] = useState(false);
+  const [forgotStep, setForgotStep] = useState<1 | 2>(1);
+  const [forgotEmail, setForgotEmail] = useState("");
+  const [forgotCounty, setForgotCounty] = useState("");
+  const [forgotCategory, setForgotCategory] = useState("");
+  const [forgotError, setForgotError] = useState("");
+  const [forgotInfo, setForgotInfo] = useState("");
+  const [forgotSubmitting, setForgotSubmitting] = useState(false);
+  const [supportEmail, setSupportEmail] = useState("anthony@iqmeeteq.com");
+
+  useEffect(() => {
+    fetch("/api/auth/support-email")
+      .then((r) => r.ok ? r.json() : null)
+      .then((d) => { if (d?.supportEmail) setSupportEmail(d.supportEmail); })
+      .catch(() => {});
+  }, []);
+
+  const openForgot = () => {
+    setForgotOpen(true);
+    setForgotStep(1);
+    setForgotEmail(loginEmail);
+    setForgotCounty("");
+    setForgotCategory("");
+    setForgotError("");
+    setForgotInfo("");
+  };
+
+  const closeForgot = () => {
+    if (forgotSubmitting) return;
+    setForgotOpen(false);
+  };
+
+  const submitForgotStep1 = (e: React.FormEvent) => {
+    e.preventDefault();
+    setForgotError("");
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(forgotEmail.trim())) {
+      setForgotError("Please enter a valid email address.");
+      return;
+    }
+    setForgotStep(2);
+  };
+
+  const submitForgotStep2 = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setForgotError("");
+    setForgotInfo("");
+    if (!forgotCounty || !forgotCategory) {
+      setForgotError("Please select your county and service category.");
+      return;
+    }
+    setForgotSubmitting(true);
+    try {
+      const res = await fetch("/api/auth/forgot-password/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: forgotEmail.trim(), county: forgotCounty, serviceCategory: forgotCategory }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.token) {
+        setLocation(`/reset-password?token=${encodeURIComponent(data.token)}`);
+        return;
+      }
+      if (res.status === 429) {
+        setForgotError(`Too many failed attempts. Please contact ${supportEmail} for help.`);
+      } else {
+        setForgotError(`We couldn't verify those details. If you keep having trouble, contact ${supportEmail}.`);
+      }
+    } catch {
+      setForgotError(`Something went wrong. Please try again or contact ${supportEmail}.`);
+    }
+    setForgotSubmitting(false);
+  };
+
   const registerForm = useForm<z.infer<typeof registerSchema>>({
     resolver: zodResolver(registerSchema),
     defaultValues: { email: "", password: "", county: "", serviceCategory: "", domainNote: "" },
@@ -287,7 +361,7 @@ export default function Home() {
                 </div>
                 {loginError && <p className="text-sm text-destructive">{loginError}</p>}
                 <div className="text-right">
-                  <button type="button" className="text-sm text-primary hover:underline" data-testid="btn-forgot-password">Forgot password?</button>
+                  <button type="button" onClick={openForgot} className="text-sm text-primary hover:underline" data-testid="btn-forgot-password">Forgot password?</button>
                 </div>
                 <Button type="submit" className="w-full bg-primary text-primary-foreground hover:bg-primary/90" disabled={loginMutation.isPending} data-testid="btn-login">
                   {loginMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
@@ -322,6 +396,90 @@ export default function Home() {
           Built by <a href="https://headandheartca.com" target="_blank" rel="noopener noreferrer" style={{ color: "inherit", textDecoration: "none" }} onMouseEnter={(e) => (e.currentTarget.style.textDecoration = "underline")} onMouseLeave={(e) => (e.currentTarget.style.textDecoration = "none")}>IQmeetEQ</a>
         </div>
       </div>
+
+      {/* Forgot password modal */}
+      {forgotOpen && (
+        <div
+          onClick={closeForgot}
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 16 }}
+          data-testid="forgot-password-modal"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{ background: "#fff", borderRadius: 12, padding: "28px 32px", maxWidth: 460, width: "100%", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}
+          >
+            <h2 style={{ fontFamily: "'DM Serif Display', serif", fontSize: 24, color: "#1A2744", margin: "0 0 6px" }}>Reset your password</h2>
+            <p style={{ fontSize: 13, color: "#6B7280", margin: "0 0 18px", lineHeight: 1.5 }}>
+              {forgotStep === 1
+                ? "Enter the email associated with your account."
+                : "Confirm your county and service category to verify your identity."}
+            </p>
+
+            {forgotStep === 1 ? (
+              <form onSubmit={submitForgotStep1} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                <div>
+                  <label style={{ display: "block", fontSize: 13, fontWeight: 500, color: "#374151", marginBottom: 6 }}>Email</label>
+                  <input
+                    type="email"
+                    autoFocus
+                    value={forgotEmail}
+                    onChange={(e) => setForgotEmail(e.target.value)}
+                    placeholder="name@county.ca.gov"
+                    style={{ width: "100%", border: "1px solid #D1D5DB", borderRadius: 6, padding: "9px 12px", fontSize: 14, color: "#111827", boxSizing: "border-box" }}
+                    data-testid="input-forgot-email"
+                  />
+                </div>
+                {forgotError && <div style={{ fontSize: 13, color: "#DC2626" }}>{forgotError}</div>}
+                <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 4 }}>
+                  <button type="button" onClick={closeForgot} style={{ background: "#fff", color: "#4B5563", border: "1px solid #D1D5DB", borderRadius: 6, padding: "9px 18px", fontSize: 14, cursor: "pointer", fontFamily: "'DM Sans', sans-serif" }} data-testid="btn-forgot-cancel">Cancel</button>
+                  <button type="submit" style={{ background: "#1A2744", color: "#fff", border: "none", borderRadius: 6, padding: "9px 18px", fontSize: 14, fontWeight: 600, cursor: "pointer", fontFamily: "'DM Sans', sans-serif" }} data-testid="btn-forgot-next">Next</button>
+                </div>
+              </form>
+            ) : (
+              <form onSubmit={submitForgotStep2} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                <div style={{ fontSize: 12, color: "#6B7280", padding: "8px 12px", background: "#F9FAFB", borderRadius: 6, border: "1px solid #E5E7EB" }}>
+                  <strong style={{ color: "#374151" }}>{forgotEmail}</strong>
+                </div>
+                <div>
+                  <label style={{ display: "block", fontSize: 13, fontWeight: 500, color: "#374151", marginBottom: 6 }}>County</label>
+                  <select
+                    value={forgotCounty}
+                    onChange={(e) => setForgotCounty(e.target.value)}
+                    style={{ width: "100%", border: "1px solid #D1D5DB", borderRadius: 6, padding: "9px 12px", fontSize: 14, color: forgotCounty ? "#111827" : "#9CA3AF", background: "#fff", boxSizing: "border-box" }}
+                    data-testid="select-forgot-county"
+                  >
+                    <option value="">Select your county…</option>
+                    {COUNTIES.map((c) => <option key={c} value={c} style={{ color: "#111827" }}>{c}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label style={{ display: "block", fontSize: 13, fontWeight: 500, color: "#374151", marginBottom: 6 }}>Service category</label>
+                  <select
+                    value={forgotCategory}
+                    onChange={(e) => setForgotCategory(e.target.value)}
+                    style={{ width: "100%", border: "1px solid #D1D5DB", borderRadius: 6, padding: "9px 12px", fontSize: 14, color: forgotCategory ? "#111827" : "#9CA3AF", background: "#fff", boxSizing: "border-box" }}
+                    data-testid="select-forgot-category"
+                  >
+                    <option value="">Select your category…</option>
+                    {SERVICE_CATEGORIES.map((c) => <option key={c} value={c} style={{ color: "#111827" }}>{c}</option>)}
+                  </select>
+                </div>
+                {forgotError && <div style={{ fontSize: 13, color: "#DC2626" }} data-testid="text-forgot-error">{forgotError}</div>}
+                {forgotInfo && <div style={{ fontSize: 13, color: "#0369A1" }}>{forgotInfo}</div>}
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 10, marginTop: 4 }}>
+                  <button type="button" onClick={() => setForgotStep(1)} disabled={forgotSubmitting} style={{ background: "#fff", color: "#4B5563", border: "1px solid #D1D5DB", borderRadius: 6, padding: "9px 18px", fontSize: 14, cursor: forgotSubmitting ? "not-allowed" : "pointer", fontFamily: "'DM Sans', sans-serif" }} data-testid="btn-forgot-back">Back</button>
+                  <div style={{ display: "flex", gap: 10 }}>
+                    <button type="button" onClick={closeForgot} disabled={forgotSubmitting} style={{ background: "#fff", color: "#4B5563", border: "1px solid #D1D5DB", borderRadius: 6, padding: "9px 18px", fontSize: 14, cursor: forgotSubmitting ? "not-allowed" : "pointer", fontFamily: "'DM Sans', sans-serif" }}>Cancel</button>
+                    <button type="submit" disabled={forgotSubmitting} style={{ background: forgotSubmitting ? "#9CA3AF" : "#1A2744", color: "#fff", border: "none", borderRadius: 6, padding: "9px 18px", fontSize: 14, fontWeight: 600, cursor: forgotSubmitting ? "not-allowed" : "pointer", fontFamily: "'DM Sans', sans-serif" }} data-testid="btn-forgot-verify">
+                      {forgotSubmitting ? "Verifying…" : "Verify & continue"}
+                    </button>
+                  </div>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Subtle gear icon — bottom-right corner, admin entry point */}
       <a

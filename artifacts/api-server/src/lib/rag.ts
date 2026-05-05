@@ -27,7 +27,23 @@ export async function embedText(text: string): Promise<number[]> {
   }
 }
 
-export async function retrieveRelevantChunks(query: string): Promise<string[]> {
+export type RetrievedChunk = {
+  docId: string;
+  title: string;
+  content: string;
+  score: number;
+};
+
+/**
+ * Retrieves top-K chunks with similarity scores. Score is cosine similarity
+ * in [0, 1] (1 = identical), derived from pgvector's `<=>` cosine-distance
+ * operator as `1 - distance`.
+ */
+export async function retrieveRelevantChunksWithScores(
+  query: string,
+  k: number = MAX_CHUNKS,
+): Promise<RetrievedChunk[]> {
+  const limit = Math.max(1, Math.min(20, k));
   try {
     const embedding = await embedText(query);
     if (embedding.length === 0) return [];
@@ -35,19 +51,30 @@ export async function retrieveRelevantChunks(query: string): Promise<string[]> {
     const embeddingStr = `[${embedding.join(",")}]`;
 
     const results = await db.execute(sql`
-      SELECT content, doc_id
-      FROM corpus_chunks
-      ORDER BY embedding <=> ${embeddingStr}::vector
-      LIMIT ${MAX_CHUNKS}
+      SELECT cc.content, cc.doc_id, cd.title,
+             (1 - (cc.embedding <=> ${embeddingStr}::vector)) AS score
+      FROM corpus_chunks cc
+      LEFT JOIN corpus_documents cd ON cd.doc_id = cc.doc_id
+      ORDER BY cc.embedding <=> ${embeddingStr}::vector
+      LIMIT ${limit}
     `);
 
-    return (results.rows as Array<{ content: string; doc_id: string }>)
-      .map((r) => r.content)
-      .slice(0, MAX_CHUNKS);
+    return (results.rows as Array<{ content: string; doc_id: string; title: string | null; score: number | string }>)
+      .map((r) => ({
+        docId: r.doc_id,
+        title: r.title ?? r.doc_id,
+        content: r.content,
+        score: typeof r.score === "string" ? parseFloat(r.score) : r.score,
+      }));
   } catch (err) {
     logger.warn({ err }, "RAG retrieval failed, continuing without context");
     return [];
   }
+}
+
+export async function retrieveRelevantChunks(query: string): Promise<string[]> {
+  const chunks = await retrieveRelevantChunksWithScores(query, MAX_CHUNKS);
+  return chunks.map((c) => c.content);
 }
 
 export async function ingestDocument(docId: string, content: string): Promise<void> {

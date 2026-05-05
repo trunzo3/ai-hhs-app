@@ -57,25 +57,15 @@ export const LAYER_2_METHODOLOGY = `You have the IQmeetEQ methodology built in. 
    - Format ("Want this as a table / checklist / one-pager?")
    Don't list all 9. Pick the 1-2 that fit the moment.`;
 
-export const TASK_CHAINS: Record<string, string> = {
-  "Break down an ACL or policy letter": `This is a Distill task. Ask: "Upload the ACL below, or paste the text. I'll break it into plain language with action items and deadlines flagged."`,
-  "Draft an email to my team": `This is a Draft task. Ask: "What's the email about, and who's the audience? Give me the key points and I'll draft it."`,
-  "Prep for a difficult conversation": `This is a Prepare task. Ask: "Who's the conversation with, and what's the situation? I'll help you plan your approach."`,
-  "Summarize a long document": `This is a Distill task. Ask: "Share the document or paste the key sections. What's the main thing you need from this — the gist, the action items, or both?"`,
-  "Get feedback on something I wrote": `This is a Critique task. Ask: "Paste what you wrote and tell me who the audience is. I'll give you specific, actionable feedback."`,
-  "Build a case for change": `This is a Synthesize task. Ask: "What change are you trying to make, and who needs to be convinced? Give me the basics and I'll help you build the case."`,
-  "Simplify a policy for my staff": `This is a Distill task. Ask: "Paste the policy or the section you want simplified. Who are you writing for — frontline staff, supervisors, clients?"`,
-  "Brainstorm solutions to a problem": `This is a Brainstorm task. Ask: "Describe the problem. What have you already tried or considered? I'll generate fresh angles."`,
-};
-
 export function buildSystemPrompt(opts: {
   ragContext: string[];
   county: string;
   serviceCategory: string;
   workingOutsideArea: boolean;
   taskLauncher?: string | null;
+  taskChainPrompt?: string | null;
 }): string {
-  const { ragContext, county, serviceCategory, workingOutsideArea, taskLauncher } = opts;
+  const { ragContext, county, serviceCategory, workingOutsideArea, taskLauncher, taskChainPrompt } = opts;
 
   let prompt = `${LAYER_1_IDENTITY}\n\n${LAYER_2_METHODOLOGY}`;
 
@@ -89,8 +79,8 @@ export function buildSystemPrompt(opts: {
     prompt += `\n\nUSER CONTEXT:\nThis user has indicated they are working outside their usual area. Respond generically without service-area-specific assumptions.`;
   }
 
-  if (taskLauncher && TASK_CHAINS[taskLauncher]) {
-    prompt += `\n\nTASK CONTEXT: The user selected the task card "${taskLauncher}". ${TASK_CHAINS[taskLauncher]}`;
+  if (taskLauncher && taskChainPrompt && taskChainPrompt.trim()) {
+    prompt += `\n\nTASK CONTEXT: The user selected the task card "${taskLauncher}". ${taskChainPrompt.trim()}`;
   }
 
   prompt += `\n\nAFTER EACH RESPONSE: End with a JSON block on its own line with this format (no preamble, just the JSON):
@@ -134,8 +124,9 @@ export async function buildSystemPromptFromDB(opts: {
   serviceCategory: string;
   workingOutsideArea: boolean;
   taskLauncher?: string | null;
+  taskChainPrompt?: string | null;
 }): Promise<string> {
-  const { ragContext, county, serviceCategory, workingOutsideArea, taskLauncher } = opts;
+  const { ragContext, county, serviceCategory, workingOutsideArea, taskLauncher, taskChainPrompt } = opts;
   const layers = await ensureLayers();
 
   let prompt = `${layers[1]}\n\n${layers[2]}`;
@@ -153,8 +144,8 @@ export async function buildSystemPromptFromDB(opts: {
     prompt += `\n\nUSER CONTEXT:\nThis user has indicated they are working outside their usual area. Respond generically without service-area-specific assumptions.`;
   }
 
-  if (taskLauncher && TASK_CHAINS[taskLauncher]) {
-    prompt += `\n\nTASK CONTEXT: The user selected the task card "${taskLauncher}". ${TASK_CHAINS[taskLauncher]}`;
+  if (taskLauncher && taskChainPrompt && taskChainPrompt.trim()) {
+    prompt += `\n\nTASK CONTEXT: The user selected the task card "${taskLauncher}". ${taskChainPrompt.trim()}`;
   }
 
   prompt += `\n\nAFTER EACH RESPONSE: End with a JSON block on its own line with this format (no preamble, just the JSON):\n{"followUps":["Option 1","Option 2"]}\nPick 1-2 Power Follow-Ups that best fit the moment from the list. The user's chat interface will render these as tappable buttons. Do not explain the follow-ups inline — just put them in the JSON at the end.`;
