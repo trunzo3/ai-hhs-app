@@ -217,9 +217,13 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
   const [viewLoading, setViewLoading] = useState(false);
 
   /* ── Task launcher cards state ── */
-  type TaskCard = { id: string; title: string; description: string; displayOrder: number; taskChainPrompt: string | null; updatedAt: string | null };
+  type TaskCard = { id: string; title: string; description: string; displayOrder: number; taskChainPrompt: string | null; corpusDocIds: string[]; updatedAt: string | null };
+  type TaskCardDraft = { title: string; description: string; displayOrder: number; taskChainPrompt: string; corpusDocIds: string[] };
   const [taskCards, setTaskCards] = useState<TaskCard[]>([]);
-  const [taskCardDrafts, setTaskCardDrafts] = useState<Record<string, { title: string; description: string; displayOrder: number; taskChainPrompt: string }>>({});
+  const [taskCardDrafts, setTaskCardDrafts] = useState<Record<string, TaskCardDraft>>({});
+  const [corpusPickerOpenFor, setCorpusPickerOpenFor] = useState<string | null>(null);
+  const [corpusDeleteConflict, setCorpusDeleteConflict] = useState<{ doc: CorpusDocMeta; cards: Array<{ id: string; title: string }> } | null>(null);
+  const [corpusDeleteForceSubmitting, setCorpusDeleteForceSubmitting] = useState(false);
   const [taskCardsFetched, setTaskCardsFetched] = useState(false);
   const [taskCardsLoading, setTaskCardsLoading] = useState(false);
   const [taskCardSavingId, setTaskCardSavingId] = useState<string | null>(null);
@@ -298,10 +302,10 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
     try {
       const res = await fetch("/api/admin/task-cards");
       if (!res.ok) throw new Error("Failed");
-      const cards: TaskCard[] = await res.json();
+      const cards: TaskCard[] = (await res.json()).map((c: any) => ({ ...c, corpusDocIds: Array.isArray(c.corpusDocIds) ? c.corpusDocIds : [] }));
       setTaskCards(cards);
-      const drafts: Record<string, { title: string; description: string; displayOrder: number; taskChainPrompt: string }> = {};
-      cards.forEach((c) => { drafts[c.id] = { title: c.title, description: c.description, displayOrder: c.displayOrder, taskChainPrompt: c.taskChainPrompt ?? "" }; });
+      const drafts: Record<string, TaskCardDraft> = {};
+      cards.forEach((c) => { drafts[c.id] = { title: c.title, description: c.description, displayOrder: c.displayOrder, taskChainPrompt: c.taskChainPrompt ?? "", corpusDocIds: [...c.corpusDocIds] }; });
       setTaskCardDrafts(drafts);
       setTaskCardsFetched(true);
     } catch { setTaskCardError("Failed to load task launcher cards."); }
@@ -329,12 +333,14 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
           description: draft.description,
           displayOrder: draft.displayOrder,
           taskChainPrompt: trimmedChain.length > 0 ? trimmedChain : null,
+          corpusDocIds: draft.corpusDocIds,
         }),
       });
       if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || "Save failed"); }
-      const updated: TaskCard = await res.json();
+      const updatedRaw: any = await res.json();
+      const updated: TaskCard = { ...updatedRaw, corpusDocIds: Array.isArray(updatedRaw.corpusDocIds) ? updatedRaw.corpusDocIds : [] };
       setTaskCards((prev) => sortTaskCards(prev.map((c) => (c.id === id ? updated : c))));
-      setTaskCardDrafts((prev) => ({ ...prev, [updated.id]: { title: updated.title, description: updated.description, displayOrder: updated.displayOrder, taskChainPrompt: updated.taskChainPrompt ?? "" } }));
+      setTaskCardDrafts((prev) => ({ ...prev, [updated.id]: { title: updated.title, description: updated.description, displayOrder: updated.displayOrder, taskChainPrompt: updated.taskChainPrompt ?? "", corpusDocIds: [...updated.corpusDocIds] } }));
     } catch (err: any) {
       setTaskCardError(err?.message ?? "Save failed.");
     }
@@ -349,12 +355,13 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
       const res = await fetch(`/api/admin/task-cards`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: "New card", description: "", taskChainPrompt: null }),
+        body: JSON.stringify({ title: "New card", description: "", taskChainPrompt: null, corpusDocIds: [] }),
       });
       if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || "Add failed"); }
-      const created: TaskCard = await res.json();
+      const createdRaw: any = await res.json();
+      const created: TaskCard = { ...createdRaw, corpusDocIds: Array.isArray(createdRaw.corpusDocIds) ? createdRaw.corpusDocIds : [] };
       setTaskCards((prev) => sortTaskCards([...prev, created]));
-      setTaskCardDrafts((prev) => ({ ...prev, [created.id]: { title: created.title, description: created.description, displayOrder: created.displayOrder, taskChainPrompt: created.taskChainPrompt ?? "" } }));
+      setTaskCardDrafts((prev) => ({ ...prev, [created.id]: { title: created.title, description: created.description, displayOrder: created.displayOrder, taskChainPrompt: created.taskChainPrompt ?? "", corpusDocIds: [...created.corpusDocIds] } }));
     } catch (err: any) {
       setTaskCardError(err?.message ?? "Add failed.");
     }
@@ -600,10 +607,36 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
     const doc = deletingDoc; setDeletingDoc(null); setDeleteText("");
     setCorpusOp(`Deleting "${doc.title}"…`); setCorpusOpError(null);
     try {
-      await fetch(`/api/admin/corpus/${encodeURIComponent(doc.docId)}`, { method: "DELETE" });
-      await fetchCorpus();
+      const res = await fetch(`/api/admin/corpus/${encodeURIComponent(doc.docId)}`, { method: "DELETE" });
+      if (res.status === 409) {
+        // The doc is force-injected by one or more task launcher cards.
+        // Surface the conflict so the admin can confirm before stripping the
+        // docId from each card's pinned-context array.
+        const data = await res.json().catch(() => ({}));
+        const cards = Array.isArray(data.referencingCards) ? data.referencingCards : [];
+        setCorpusDeleteConflict({ doc, cards });
+      } else if (!res.ok) {
+        throw new Error("Delete failed");
+      } else {
+        await fetchCorpus();
+        await fetchTaskCards();
+      }
     } catch { setCorpusOpError("Delete failed."); }
     setCorpusOp(null);
+  };
+
+  const handleForceDeleteCorpusDoc = async () => {
+    if (!corpusDeleteConflict) return;
+    const { doc } = corpusDeleteConflict;
+    setCorpusDeleteForceSubmitting(true); setCorpusOpError(null);
+    try {
+      const res = await fetch(`/api/admin/corpus/${encodeURIComponent(doc.docId)}?force=true`, { method: "DELETE" });
+      if (!res.ok) throw new Error("Delete failed");
+      setCorpusDeleteConflict(null);
+      await fetchCorpus();
+      await fetchTaskCards();
+    } catch { setCorpusOpError("Delete failed."); }
+    setCorpusDeleteForceSubmitting(false);
   };
 
   const handleViewDoc = async (doc: CorpusDocMeta) => {
@@ -1139,6 +1172,27 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
                   })}
                 </div>
               )}
+              {corpusDeleteConflict && (
+                <div role="dialog" aria-modal="true" style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 60, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <div style={{ background: "#fff", borderRadius: 10, padding: "20px 22px", maxWidth: 520, width: "92%", boxShadow: "0 12px 40px rgba(0,0,0,0.25)" }} data-testid="modal-corpus-delete-conflict">
+                    <h3 style={{ margin: "0 0 8px", fontSize: 17, color: "#1A2744" }}>Document is pinned to task launcher cards</h3>
+                    <p style={{ fontSize: 13, color: "#374151", margin: "0 0 10px", lineHeight: 1.5 }}>
+                      <strong>"{corpusDeleteConflict.doc.title}"</strong> is force-injected by the following card{corpusDeleteConflict.cards.length === 1 ? "" : "s"}. Deleting it will remove the document and unpin it from each card's force-injected list.
+                    </p>
+                    <ul style={{ margin: "0 0 14px 18px", padding: 0, fontSize: 13, color: "#111827" }}>
+                      {corpusDeleteConflict.cards.map((c) => (
+                        <li key={c.id} style={{ marginBottom: 4 }}>{c.title}</li>
+                      ))}
+                    </ul>
+                    <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                      <button onClick={() => setCorpusDeleteConflict(null)} disabled={corpusDeleteForceSubmitting} style={btnStyle("#6B7280", corpusDeleteForceSubmitting)} data-testid="btn-cancel-force-delete">Cancel</button>
+                      <button onClick={handleForceDeleteCorpusDoc} disabled={corpusDeleteForceSubmitting} style={btnStyle("#DC2626", corpusDeleteForceSubmitting)} data-testid="btn-confirm-force-delete">
+                        {corpusDeleteForceSubmitting ? "Deleting…" : "Delete & unpin"}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               <input ref={replaceInputRef} type="file" accept=".md,.txt" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; if (f) handleReplaceDoc(f); if (replaceInputRef.current) replaceInputRef.current.value = ""; }} />
 
@@ -1227,9 +1281,12 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
               ) : (
                 <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
                   {taskCards.map((card, idx) => {
-                    const draft = taskCardDrafts[card.id] ?? { title: card.title, description: card.description, displayOrder: card.displayOrder, taskChainPrompt: card.taskChainPrompt ?? "" };
+                    const draft = taskCardDrafts[card.id] ?? { title: card.title, description: card.description, displayOrder: card.displayOrder, taskChainPrompt: card.taskChainPrompt ?? "", corpusDocIds: [...card.corpusDocIds] };
                     const savedChain = card.taskChainPrompt ?? "";
-                    const isDirty = draft.title !== card.title || draft.description !== card.description || draft.displayOrder !== card.displayOrder || draft.taskChainPrompt !== savedChain;
+                    const savedDocIds = [...card.corpusDocIds].sort();
+                    const draftDocIds = [...draft.corpusDocIds].sort();
+                    const docIdsDirty = savedDocIds.length !== draftDocIds.length || savedDocIds.some((d, i) => d !== draftDocIds[i]);
+                    const isDirty = draft.title !== card.title || draft.description !== card.description || draft.displayOrder !== card.displayOrder || draft.taskChainPrompt !== savedChain || docIdsDirty;
                     const isSaving = taskCardSavingId === card.id;
                     const isHiddenFromChat = idx >= 8;
                     return (
@@ -1281,6 +1338,76 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
                             style={{ width: "100%", minHeight: 90, border: "1px solid #D1D5DB", borderRadius: 6, padding: "8px 10px", fontSize: 13, color: "#111827", fontFamily: "monospace", lineHeight: 1.5, resize: "vertical", boxSizing: "border-box", outline: "none" }}
                             data-testid={`input-task-chain-${card.id}`}
                           />
+                        </div>
+                        <div style={{ marginTop: 12 }}>
+                          <label style={labelStyle}>Force-injected corpus documents <span style={{ fontWeight: 400, color: "#9CA3AF" }}>(optional — these documents are guaranteed in context when this card is used; RAG search excludes them)</span></label>
+                          {!corpusFetched ? (
+                            <p style={{ fontSize: 12, color: "#9CA3AF", margin: "4px 0 0" }}>Open the Corpus Documents section above to load the document list.</p>
+                          ) : (
+                            <div>
+                              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 4, marginBottom: 6 }}>
+                                {draft.corpusDocIds.length === 0 ? (
+                                  <span style={{ fontSize: 12, color: "#9CA3AF" }}>None pinned — only similarity-retrieved chunks will appear in context.</span>
+                                ) : (
+                                  draft.corpusDocIds.map((docId) => {
+                                    const meta = corpusDocs.find((d) => d.docId === docId);
+                                    const label = meta?.title ?? docId;
+                                    return (
+                                      <span key={docId} style={{ background: "#1A2744", color: "#fff", padding: "3px 8px", borderRadius: 4, fontSize: 12, display: "inline-flex", alignItems: "center", gap: 6 }}>
+                                        {label}{!meta && <span style={{ fontSize: 10, opacity: 0.7 }}>(missing)</span>}
+                                        <button
+                                          type="button"
+                                          onClick={() => setTaskCardDrafts((prev) => ({ ...prev, [card.id]: { ...draft, corpusDocIds: draft.corpusDocIds.filter((d) => d !== docId) } }))}
+                                          style={{ background: "none", border: "none", color: "#fff", cursor: "pointer", padding: 0, fontSize: 14, lineHeight: 1 }}
+                                          aria-label={`Remove ${label}`}
+                                          data-testid={`btn-unpin-doc-${card.id}-${docId}`}
+                                        >×</button>
+                                      </span>
+                                    );
+                                  })
+                                )}
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => setCorpusPickerOpenFor(corpusPickerOpenFor === card.id ? null : card.id)}
+                                style={{ ...btnStyle("#6B7280", false), padding: "6px 12px", fontSize: 12 }}
+                                data-testid={`btn-pick-docs-${card.id}`}
+                              >
+                                {corpusPickerOpenFor === card.id ? "Close picker" : "Pick documents…"}
+                              </button>
+                              {corpusPickerOpenFor === card.id && (
+                                <div style={{ marginTop: 8, border: "1px solid #D1D5DB", borderRadius: 6, padding: "8px 10px", background: "#fff", maxHeight: 220, overflowY: "auto" }}>
+                                  {corpusDocs.length === 0 ? (
+                                    <p style={{ fontSize: 12, color: "#9CA3AF", margin: 0 }}>No corpus documents available.</p>
+                                  ) : (
+                                    corpusDocs.map((doc) => {
+                                      const checked = draft.corpusDocIds.includes(doc.docId);
+                                      return (
+                                        <label key={doc.docId} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 0", fontSize: 13, cursor: "pointer" }}>
+                                          <input
+                                            type="checkbox"
+                                            checked={checked}
+                                            onChange={(e) => {
+                                              setTaskCardDrafts((prev) => {
+                                                const cur = prev[card.id] ?? draft;
+                                                const next = e.target.checked
+                                                  ? Array.from(new Set([...cur.corpusDocIds, doc.docId]))
+                                                  : cur.corpusDocIds.filter((d) => d !== doc.docId);
+                                                return { ...prev, [card.id]: { ...cur, corpusDocIds: next } };
+                                              });
+                                            }}
+                                            data-testid={`chk-pin-doc-${card.id}-${doc.docId}`}
+                                          />
+                                          <span style={{ fontWeight: 500 }}>{doc.title}</span>
+                                          <span style={{ color: "#9CA3AF", fontSize: 11 }}>{doc.docId}</span>
+                                        </label>
+                                      );
+                                    })
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          )}
                         </div>
                         <div style={{ display: "flex", gap: 10, marginTop: 12, alignItems: "center", flexWrap: "wrap" }}>
                           <button

@@ -64,8 +64,19 @@ router.get("/admin/stats", requireAdmin, async (req, res): Promise<void> => {
     const returningUsers = convCountsRaw.filter((r) => r.convCount > 1).length;
     const oneTimeUsers = convCountsRaw.filter((r) => r.convCount === 1).length;
 
-    const taskLauncherUsageRaw = await db.select({ label: conversationMetadataTable.taskLauncherUsed, count: count() }).from(conversationMetadataTable).where(sql`${conversationMetadataTable.taskLauncherUsed} IS NOT NULL`).groupBy(conversationMetadataTable.taskLauncherUsed).orderBy(desc(count()));
-    const taskLauncherUsage = taskLauncherUsageRaw.map((r) => ({ label: r.label ?? "Unknown", count: r.count }));
+    // Prefer the live card title via JOIN on the bound card UUID so renames
+    // propagate retroactively. Fall back to the legacy text column for
+    // pre-UUID conversations or rows whose card has since been deleted.
+    const taskLauncherUsageRows = await db.execute(sql`
+      SELECT COALESCE(c.title, m.task_launcher_used) AS label, COUNT(*)::int AS count
+      FROM conversation_metadata m
+      LEFT JOIN task_launcher_cards c ON c.id = m.task_launcher_card_id
+      WHERE m.task_launcher_card_id IS NOT NULL OR m.task_launcher_used IS NOT NULL
+      GROUP BY COALESCE(c.title, m.task_launcher_used)
+      ORDER BY count DESC
+    `);
+    const taskLauncherUsage = (taskLauncherUsageRows.rows as Array<{ label: string | null; count: number }>)
+      .map((r) => ({ label: r.label ?? "Unknown", count: r.count }));
 
     const [{ thumbsUpCount }] = await db.select({ thumbsUpCount: count() }).from(responseRatingsTable).where(eq(responseRatingsTable.rating, "up"));
     const [{ thumbsDownCount }] = await db.select({ thumbsDownCount: count() }).from(responseRatingsTable).where(eq(responseRatingsTable.rating, "down"));
@@ -232,9 +243,41 @@ router.put("/admin/corpus/:docId", requireAdmin, async (req, res): Promise<void>
 router.delete("/admin/corpus/:docId", requireAdmin, async (req, res): Promise<void> => {
   try {
     const { docId } = req.params;
-    await db.execute(sql`DELETE FROM corpus_chunks WHERE doc_id = ${docId}`);
-    await db.delete(corpusDocumentsTable).where(eq(corpusDocumentsTable.docId, docId));
-    res.json({ success: true });
+    const force = req.query.force === "true" || req.query.force === "1";
+
+    // Find every task launcher card that pins this docId in its corpus_doc_ids.
+    // Without ?force=true, refuse the delete and report the references so the
+    // admin can confirm. With ?force=true, strip the docId from each card's
+    // array atomically with the document/chunk delete.
+    const referencingCards = await db
+      .select({ id: taskLauncherCardsTable.id, title: taskLauncherCardsTable.title })
+      .from(taskLauncherCardsTable)
+      .where(sql`${taskLauncherCardsTable.corpusDocIds} @> ARRAY[${docId}]::text[]`);
+
+    if (referencingCards.length > 0 && !force) {
+      res.status(409).json({
+        error: "Document is force-injected by one or more task launcher cards.",
+        referencingCards,
+      });
+      return;
+    }
+
+    await db.transaction(async (tx) => {
+      if (referencingCards.length > 0) {
+        // array_remove keeps order for the remaining elements; if the resulting
+        // array is empty, normalize to NULL so the "no pinned docs" state is
+        // canonical.
+        await tx.execute(sql`
+          UPDATE task_launcher_cards
+          SET corpus_doc_ids = NULLIF(array_remove(corpus_doc_ids, ${docId}), '{}'::text[]),
+              updated_at = NOW()
+          WHERE corpus_doc_ids @> ARRAY[${docId}]::text[]
+        `);
+      }
+      await tx.execute(sql`DELETE FROM corpus_chunks WHERE doc_id = ${docId}`);
+      await tx.delete(corpusDocumentsTable).where(eq(corpusDocumentsTable.docId, docId));
+    });
+    res.json({ success: true, removedFromCards: referencingCards.length });
   } catch (err) {
     req.log.error({ err }, "Failed to delete corpus document");
     res.status(500).json({ error: "Failed to delete document" });
@@ -455,6 +498,7 @@ router.get("/admin/task-cards", requireAdmin, async (req, res): Promise<void> =>
       description: r.description,
       displayOrder: r.displayOrder,
       taskChainPrompt: r.taskChainPrompt,
+      corpusDocIds: r.corpusDocIds ?? [],
       updatedAt: r.updatedAt?.toISOString() ?? null,
     })));
   } catch (err) {
@@ -465,11 +509,16 @@ router.get("/admin/task-cards", requireAdmin, async (req, res): Promise<void> =>
 
 router.post("/admin/task-cards", requireAdmin, async (req, res): Promise<void> => {
   try {
-    const { title, description, taskChainPrompt } = req.body ?? {};
+    const { title, description, taskChainPrompt, corpusDocIds } = req.body ?? {};
     const trimmedTitle = typeof title === "string" ? title.trim() : "";
     if (!trimmedTitle) { res.status(400).json({ error: "Title is required" }); return; }
     const desc = typeof description === "string" ? description : "";
     const chainPrompt = typeof taskChainPrompt === "string" ? taskChainPrompt : null;
+    // Sanitize corpusDocIds: must be array of non-empty strings; empty → null.
+    const docIds = Array.isArray(corpusDocIds)
+      ? corpusDocIds.filter((d): d is string => typeof d === "string" && d.length > 0)
+      : null;
+    const corpusDocIdsValue = docIds && docIds.length > 0 ? docIds : null;
 
     // Display order is always assigned server-side as max(existing) + 1.
     // The new card lands at the end of the list, hidden from chat (since chat
@@ -480,12 +529,13 @@ router.post("/admin/task-cards", requireAdmin, async (req, res): Promise<void> =
         .from(taskLauncherCardsTable);
       return tx
         .insert(taskLauncherCardsTable)
-        .values({ title: trimmedTitle, description: desc, displayOrder: (maxOrder ?? 0) + 1, taskChainPrompt: chainPrompt })
+        .values({ title: trimmedTitle, description: desc, displayOrder: (maxOrder ?? 0) + 1, taskChainPrompt: chainPrompt, corpusDocIds: corpusDocIdsValue })
         .returning();
     });
     res.status(201).json({
       id: created.id, title: created.title, description: created.description,
       displayOrder: created.displayOrder, taskChainPrompt: created.taskChainPrompt,
+      corpusDocIds: created.corpusDocIds ?? [],
       updatedAt: created.updatedAt?.toISOString() ?? null,
     });
   } catch (err) {
@@ -497,7 +547,7 @@ router.post("/admin/task-cards", requireAdmin, async (req, res): Promise<void> =
 router.patch("/admin/task-cards/:id", requireAdmin, async (req, res): Promise<void> => {
   try {
     const { id } = req.params;
-    const { title, description, displayOrder, taskChainPrompt } = req.body ?? {};
+    const { title, description, displayOrder, taskChainPrompt, corpusDocIds } = req.body ?? {};
     const update: any = { updatedAt: new Date() };
     if (typeof title === "string" && title.trim()) update.title = title.trim();
     if (typeof description === "string") update.description = description;
@@ -507,6 +557,14 @@ router.patch("/admin/task-cards/:id", requireAdmin, async (req, res): Promise<vo
     // taskChainPrompt: accept string (set/replace) or explicit null (clear).
     if (typeof taskChainPrompt === "string" || taskChainPrompt === null) {
       update.taskChainPrompt = taskChainPrompt === null ? null : taskChainPrompt;
+    }
+    // corpusDocIds: accept array (set/replace) or explicit null (clear). Empty
+    // arrays are stored as NULL so "no force-injection" is one canonical state.
+    if (corpusDocIds === null) {
+      update.corpusDocIds = null;
+    } else if (Array.isArray(corpusDocIds)) {
+      const cleaned = corpusDocIds.filter((d): d is string => typeof d === "string" && d.length > 0);
+      update.corpusDocIds = cleaned.length > 0 ? cleaned : null;
     }
     if (Object.keys(update).length === 1) {
       res.status(400).json({ error: "No valid fields to update" });
@@ -518,6 +576,7 @@ router.patch("/admin/task-cards/:id", requireAdmin, async (req, res): Promise<vo
     res.json({
       id: updated.id, title: updated.title, description: updated.description,
       displayOrder: updated.displayOrder, taskChainPrompt: updated.taskChainPrompt,
+      corpusDocIds: updated.corpusDocIds ?? [],
       updatedAt: updated.updatedAt?.toISOString() ?? null,
     });
   } catch (err) {

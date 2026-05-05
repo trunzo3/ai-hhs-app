@@ -1,0 +1,134 @@
+# Replit Prompt — App Updates
+
+## Project Context
+
+AI for HHS is an AI coaching web app for California county Health and Human Services managers. The stack is Express 5 (backend, port 8080), React 18 + Vite (frontend), PostgreSQL with pgvector, and Drizzle ORM. Key files for these changes: `systemPrompt.ts` (system prompt assembly and hardcoded `TASK_CHAINS` map), `tokenTracker.ts` (model selection, cost tracking, auto-downgrade), `rag.ts` (embedding and retrieval pipeline), `Admin.tsx` (admin dashboard), `Home.tsx` (login/registration page), and the Drizzle schema files in `lib/db/src/schema/`.
+
+## Instructions
+
+Eight changes below. Checkpoint after completing each section before moving to the next.
+
+---
+
+## 1. Move task chain instructions from hardcoded code into the database
+
+**The problem:** Task chain instructions (the prompt the model receives when a user clicks a task launcher card) are currently hardcoded in a `TASK_CHAINS` map in `systemPrompt.ts`, keyed by card title. If a card's title is changed in the admin panel but not updated in the code, the instruction silently stops firing. This also means I have to request a code change every time I add or rename a card.
+
+**The fix:**
+
+- Add a text field (`taskChainPrompt` or similar) to the `task_launcher_cards` table. Nullable — cards without a task chain instruction should still work, they just won't inject a task-specific prompt.
+- Update the admin panel's Task Launcher Cards section (Settings tab) to include this field on both the "Add card" and "Edit card" flows. A textarea is fine — these instructions can be multiple paragraphs.
+- Update the chat message handler to pull the task chain instruction from the card's database row instead of looking it up in the hardcoded `TASK_CHAINS` map.
+- Remove the hardcoded `TASK_CHAINS` map from `systemPrompt.ts` once the migration is complete.
+- The task chain prompt should be appended to the system prompt the same way the hardcoded version was — after Layer 4 (User Context), as a task-specific instruction block.
+
+---
+
+## 2. Add forced corpus document injection to task launcher cards
+
+**The problem:** When a user clicks a task launcher card, the app knows exactly which task they want — but the corpus documents needed for that task are retrieved via probabilistic similarity search, which can miss or return the wrong chunks. When intent is known, retrieval shouldn't be left to chance.
+
+**The fix:**
+
+- Add a `corpusDocIds` field (text array or similar) to the `task_launcher_cards` table. Nullable.
+- In the admin panel's Task Launcher Cards section, display this field as a multi-select populated from the `corpus_documents` table (showing document titles, storing docIds). The admin checks which corpus documents should always be present in context when that card is clicked.
+- When a card with `corpusDocIds` is used, inject ALL chunks from every specified document into Layer 3 of the system prompt. This bypasses similarity search for those documents — they are guaranteed to be in context.
+- RAG similarity search still runs at its normal 3 chunks alongside force-injected documents, but must exclude chunks from documents that are already force-injected. No duplication.
+- Force-injected documents should appear first in Layer 3, before any RAG-retrieved chunks.
+- Force-injection must persist on every turn of the conversation, not just the first message. The code should look up the card's `corpusDocIds` on every turn using the stored card reference in conversation metadata.
+
+**Related change — conversation metadata:**
+
+- `taskLauncherUsed` in the `conversation_metadata` table currently stores the card title as text. Change this to store the card's UUID instead. This ensures force-injection and task chain prompt lookup survive card renames. Update any admin dashboard queries that display task launcher usage to join back to the card table for the title.
+
+**Related change — corpus document deletion safety:**
+
+- When an admin attempts to delete a corpus document through the admin panel, check whether any task launcher card references that document's docId in its `corpusDocIds` field.
+- If referenced, show a warning before allowing deletion: "This document is linked to [card title]. Deleting it will remove it from that card's forced context. Are you sure?"
+- If the admin proceeds, delete the document and remove its docId from the referencing card's `corpusDocIds` array.
+
+---
+
+## 3. Add a retrieval debug view to the admin panel
+
+**The problem:** When I add or edit corpus documents, I have no way to verify which chunks are being retrieved on a given chat turn. I can't tell whether a document is surfacing, being outcompeted by another document, or not matching at all.
+
+**The fix:**
+
+- Add a debug/diagnostic section to the admin panel (either as its own tab or within the Settings tab) that shows retrieval data from recent chat turns.
+- For each turn, show: the user's query, the retrieved chunk titles/docIds, the similarity scores, and a preview of the chunk content.
+- Distinguish between force-injected documents (from the card's `corpusDocIds`) and RAG-retrieved documents (from similarity search). Label them clearly.
+- A toggle to enable/disable this logging is fine — it doesn't need to run on every turn in production, just when I'm actively tuning.
+- Keep it lightweight. I don't need a full conversation replay — just enough to answer: "When a user said X, which chunks did the system retrieve, and how confident was the match?"
+
+---
+
+## 4. Add a corpus retrieval test tool to the admin panel
+
+**The problem:** Testing whether a corpus document surfaces for a specific query requires going to the chat, typing the query, coming back to the admin panel, and checking the debug log. When I'm iterating on a document, that loop is too slow.
+
+**The fix:**
+
+- Add a "Test retrieval" input in the Corpus Documents section of the Settings tab.
+- I type a query, it runs the embedding and cosine similarity search against the corpus, and shows me the top chunks that would be retrieved — docId, chunk preview, and similarity score.
+- No conversation is created, no tokens are spent, no chat message is sent. This is a retrieval-only diagnostic.
+- This uses the same embedding and retrieval pipeline the chat handler uses (`rag.ts`), so the results match what would actually happen in a real conversation.
+
+---
+
+## 5. Build a self-service password reset flow
+
+**The problem:** The "Forgot password?" link on the login page calls the backend, which generates a reset token and stores it with a 1-hour expiry. But no email is ever sent — nodemailer is in the dependencies but not wired to a transactional email service. The user clicks "forgot password," sees a success message, and never receives anything. The flow is broken end-to-end.
+
+**The fix — self-service reset using registration data as verification:**
+
+The app already collects county and service category at registration via dropdowns. Use these as identity verification instead of email delivery.
+
+- User clicks "Forgot password?" on the login page.
+- User enters their email address.
+- App presents two dropdowns: county (all 58, same list as registration) and service category (all 11 options, same list as registration). The user must select the same county and service category they registered with.
+- If both match → show a "Set new password" form right there. User enters a new password and is done. Fully self-service, no admin involvement.
+- If the verification fails → increment a failure counter for that email. After 3 failed attempts, lock the reset flow for that email for 1 hour. Display a message: "Unable to verify your identity. Contact [configurable support email] to have your password reset."
+- The lockout counter must behave identically whether the email exists in the system or not. Do not reveal whether an account exists for a given email at any point in this flow — show the same verification form regardless, and fail silently on submission if the email isn't found.
+
+**Fallback — admin-side reset for users who can't self-serve:**
+
+- Add a "Reset password" button on each user row in the Users tab of the admin panel.
+- When clicked, generate a reset token and display the full reset URL on screen so the admin can copy it and send to the user manually.
+- The reset URL points to a password reset page where the user sets a new password using the token. Build this page — a simple form that takes the token from the URL, accepts a new password, and calls the existing `POST /api/auth/reset-password` endpoint.
+
+---
+
+## 6. Add a configurable support email
+
+**The problem:** The admin contact email (`anthony@iqmeeteq.com`) is hardcoded in multiple places — the disabled account message, and the password reset failure message. If the contact email changes, it requires a code change and redeploy.
+
+**The fix:**
+
+- Add a `support_email` config value to the `app_config` table, editable from the Settings tab in the admin panel.
+- Replace all hardcoded instances of the admin contact email with this config value. Currently appears in: the disabled user login error message, and the password reset lockout message from #5 above. Check for any other hardcoded instances.
+- Default to `anthony@iqmeeteq.com` if no value is set.
+
+---
+
+## 7. Fix the model string mismatch in `tokenTracker.ts`
+
+**The problem:** The admin UI offers `claude-opus-4-6` and `claude-sonnet-4-6` as model options. But `getActiveModel()` in `tokenTracker.ts` defaults to `claude-opus-4-5` when no `active_model` row exists in the database, and the auto-downgrade logic writes `claude-sonnet-4-5` when the spend threshold is exceeded. These are stale model strings that don't match the admin UI or current Anthropic API model names.
+
+**The fix:**
+
+- Update the fallback default in `getActiveModel()` from `claude-opus-4-5` to `claude-opus-4-6`.
+- Update the auto-downgrade target in `trackTokenUsage()` from `claude-sonnet-4-5` to `claude-sonnet-4-6`.
+- Confirm these strings match exactly what the admin UI dropdown offers.
+
+---
+
+## 8. Verify and update token cost constants in `tokenTracker.ts`
+
+**The problem:** The per-token cost constants are hardcoded for Claude 4.5 pricing (Opus: $5/M input, $25/M output; Sonnet: $3/M input, $15/M output). If Claude 4.6 pricing is different, cost tracking and the auto-downgrade threshold are both calculating wrong.
+
+**The fix:**
+
+- Check current Anthropic pricing for Claude Opus 4.6 and Claude Sonnet 4.6.
+- Update the cost constants in `tokenTracker.ts` to match.
+- If you can't confirm current pricing, flag it and leave the existing values with a code comment noting they may be stale.

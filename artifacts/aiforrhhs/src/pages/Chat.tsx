@@ -20,7 +20,7 @@ type Message = {
   fileAttached?: string; // filename or type label
 };
 
-type TaskCardData = { title: string; desc: string };
+type TaskCardData = { id: string; title: string; desc: string };
 
 const OPENING_MESSAGE =
   "This tool is built for HHS work. You don't need to know how to prompt — just tell me what you're trying to get done, and I'll walk you through it. Pick a task below, or describe what's on your plate.";
@@ -99,7 +99,7 @@ export default function Chat() {
       .then((r) => (r.ok ? r.json() : null))
       .then((rows) => {
         if (cancelled || !Array.isArray(rows)) return;
-        setTaskCards(rows.map((r: any) => ({ title: r.title, desc: r.description })));
+        setTaskCards(rows.map((r: any) => ({ id: r.id, title: r.title, desc: r.description })));
       })
       .catch(() => { /* on error, leave taskCards empty */ });
     return () => { cancelled = true; };
@@ -156,7 +156,7 @@ export default function Chat() {
     abortControllerRef.current?.abort();
   };
 
-  const sendMessage = async (text: string, isTaskLauncher = false) => {
+  const sendMessage = async (text: string, isTaskLauncher = false, taskLauncherCardId?: string) => {
     if (!text.trim() && !selectedFile) return;
     if (!conversationId) return;
     if (isStreaming) return;
@@ -193,7 +193,7 @@ export default function Chat() {
       const response = await fetch("/api/chat/message", {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
-        body: JSON.stringify({ conversationId, message: text, fileBase64, fileMediaType, taskLauncher: isTaskLauncher ? text : undefined }),
+        body: JSON.stringify({ conversationId, message: text, fileBase64, fileMediaType, taskLauncher: isTaskLauncher ? text : undefined, taskLauncherCardId }),
         signal: controller.signal,
       });
 
@@ -440,7 +440,7 @@ export default function Chat() {
             <>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 24 }}>
                 {taskCards.map((task, i) => (
-                  <TaskCard key={i} title={task.title} desc={task.desc} onClick={() => sendMessage(task.title, true)} testId={`btn-task-${i}`} />
+                  <TaskCard key={i} title={task.title} desc={task.desc} onClick={() => sendMessage(task.title, true, task.id)} testId={`btn-task-${i}`} />
                 ))}
               </div>
               <div style={{ textAlign: "center", marginTop: 20 }}>

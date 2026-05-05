@@ -4,7 +4,7 @@ import mammoth from "mammoth";
 import { db, conversationMetadataTable, responseRatingsTable, usersTable, taskLauncherCardsTable, retrievalDebugLogTable } from "@workspace/db";
 import { eq, asc } from "drizzle-orm";
 import { buildSystemPromptFromDB } from "../../lib/systemPrompt";
-import { retrieveRelevantChunksWithScores, type RetrievedChunk } from "../../lib/rag";
+import { retrieveRelevantChunksWithScores, getAllChunksForDocs, type RetrievedChunk } from "../../lib/rag";
 import { getDebugRetrievalLogging } from "../../lib/appConfig";
 import {
   getHistory,
@@ -53,6 +53,9 @@ router.get("/chat/task-cards", async (_req, res): Promise<void> => {
       .from(taskLauncherCardsTable)
       .orderBy(asc(taskLauncherCardsTable.displayOrder), asc(taskLauncherCardsTable.title))
       .limit(8);
+    // Frontend uses `id` to bind a conversation to a card so force-injected
+    // corpus docs and the task chain prompt are looked up by UUID on every turn,
+    // surviving title/description edits.
     res.json(rows);
   } catch (err) {
     logger.error({ err }, "Failed to fetch task launcher cards");
@@ -75,7 +78,7 @@ router.post("/chat/conversation/start", requireAuth, async (req, res): Promise<v
 
 router.post("/chat/message", requireAuth, async (req, res): Promise<void> => {
   const userId = (req.session as any).userId;
-  const { conversationId, message, fileBase64, fileMediaType, taskLauncher, workingOutsideArea } = req.body;
+  const { conversationId, message, fileBase64, fileMediaType, taskLauncher, taskLauncherCardId, workingOutsideArea } = req.body;
 
   if (!conversationId || message == null) {
     res.status(400).json({ error: "conversationId and message are required" });
@@ -88,55 +91,100 @@ router.post("/chat/message", requireAuth, async (req, res): Promise<void> => {
     return;
   }
 
-  const retrievedChunks: RetrievedChunk[] = await retrieveRelevantChunksWithScores(message);
-  const ragContext = retrievedChunks.map((c) => c.content);
-
-  // Resolve the task chain prompt from the matching launcher card (admin-editable).
-  let taskChainPrompt: string | null = null;
-  if (taskLauncher && typeof taskLauncher === "string") {
+  // Bind the conversation to the task card on the FIRST turn that includes a
+  // taskLauncherCardId (or re-bind if a different card is launched mid-chat).
+  // Once bound, every subsequent turn re-reads the card by UUID — so renames,
+  // task-chain-prompt edits, and corpusDocIds changes take effect immediately
+  // without re-binding.
+  if (taskLauncherCardId && typeof taskLauncherCardId === "string") {
     try {
       const [card] = await db
-        .select({ taskChainPrompt: taskLauncherCardsTable.taskChainPrompt })
+        .select({ title: taskLauncherCardsTable.title })
         .from(taskLauncherCardsTable)
-        .where(eq(taskLauncherCardsTable.title, taskLauncher));
-      if (card?.taskChainPrompt && card.taskChainPrompt.trim()) {
-        taskChainPrompt = card.taskChainPrompt;
+        .where(eq(taskLauncherCardsTable.id, taskLauncherCardId));
+      if (card) {
+        await db.update(conversationMetadataTable)
+          .set({ taskLauncherCardId, taskLauncherUsed: card.title })
+          .where(eq(conversationMetadataTable.id, conversationId));
       }
     } catch (err) {
-      req.log.warn({ err, taskLauncher }, "Failed to load task chain prompt");
+      req.log.warn({ err, taskLauncherCardId }, "Failed to bind conversation to task card");
     }
+  } else if (taskLauncher && typeof taskLauncher === "string") {
+    // Legacy / outside-area path with no card UUID — record the title only.
+    await db.update(conversationMetadataTable)
+      .set({ taskLauncherUsed: taskLauncher })
+      .where(eq(conversationMetadataTable.id, conversationId));
   }
+
+  // Re-read the conversation's bound card on EVERY turn so force-injection and
+  // task-chain prompt persist past the first message.
+  let boundCard: { id: string; title: string; taskChainPrompt: string | null; corpusDocIds: string[] | null } | null = null;
+  try {
+    const [conv] = await db
+      .select({ cardId: conversationMetadataTable.taskLauncherCardId })
+      .from(conversationMetadataTable)
+      .where(eq(conversationMetadataTable.id, conversationId));
+    if (conv?.cardId) {
+      const [card] = await db
+        .select({
+          id: taskLauncherCardsTable.id,
+          title: taskLauncherCardsTable.title,
+          taskChainPrompt: taskLauncherCardsTable.taskChainPrompt,
+          corpusDocIds: taskLauncherCardsTable.corpusDocIds,
+        })
+        .from(taskLauncherCardsTable)
+        .where(eq(taskLauncherCardsTable.id, conv.cardId));
+      if (card) boundCard = card;
+    }
+  } catch (err) {
+    req.log.warn({ err }, "Failed to load bound task card");
+  }
+
+  // Force-inject ALL chunks from the card's pinned corpus docs. These appear
+  // first in Layer 3, before similarity-retrieved chunks. RAG search excludes
+  // these docIds so we never duplicate content.
+  const forcedDocIds = (boundCard?.corpusDocIds ?? []).filter((d): d is string => typeof d === "string" && d.length > 0);
+  const forcedChunks: RetrievedChunk[] = forcedDocIds.length > 0
+    ? await getAllChunksForDocs(forcedDocIds)
+    : [];
+  const ragChunks: RetrievedChunk[] = await retrieveRelevantChunksWithScores(message, undefined, forcedDocIds);
+  const ragContext = [...forcedChunks, ...ragChunks].map((c) => c.content);
+
+  const taskChainPrompt = boundCard?.taskChainPrompt && boundCard.taskChainPrompt.trim() ? boundCard.taskChainPrompt : null;
+  const taskLauncherTitle = boundCard?.title ?? (typeof taskLauncher === "string" ? taskLauncher : null);
 
   const systemPrompt = await buildSystemPromptFromDB({
     ragContext,
     county: user.county,
     serviceCategory: user.serviceCategory,
     workingOutsideArea: workingOutsideArea ?? false,
-    taskLauncher: taskLauncher ?? null,
+    taskLauncher: taskLauncherTitle,
     taskChainPrompt,
   });
 
-  if (taskLauncher) {
-    await db.update(conversationMetadataTable)
-      .set({ taskLauncherUsed: taskLauncher })
-      .where(eq(conversationMetadataTable.id, conversationId));
-  }
-
   // Optionally log retrieval for admin debug view (off by default).
+  // Forced and RAG chunks are tagged separately so the admin can see at a
+  // glance which documents were guaranteed vs. which won similarity search.
   try {
     const debugOn = await getDebugRetrievalLogging();
     if (debugOn) {
+      const tagged = [
+        ...forcedChunks.map((c) => ({
+          docId: c.docId, title: c.title, score: c.score, source: "forced" as const,
+          preview: c.content.slice(0, 280),
+        })),
+        ...ragChunks.map((c) => ({
+          docId: c.docId, title: c.title, score: c.score, source: "rag" as const,
+          preview: c.content.slice(0, 280),
+        })),
+      ];
       await db.insert(retrievalDebugLogTable).values({
         conversationId,
         userId: user.id,
         userEmail: user.email,
         query: typeof message === "string" ? message.slice(0, 2000) : "",
-        chunks: retrievedChunks.map((c) => ({
-          docId: c.docId,
-          title: c.title,
-          score: c.score,
-          preview: c.content.slice(0, 280),
-        })),
+        chunks: tagged,
       });
     }
   } catch (err) {

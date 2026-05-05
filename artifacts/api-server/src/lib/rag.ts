@@ -42,6 +42,7 @@ export type RetrievedChunk = {
 export async function retrieveRelevantChunksWithScores(
   query: string,
   k: number = MAX_CHUNKS,
+  excludeDocIds: string[] = [],
 ): Promise<RetrievedChunk[]> {
   const limit = Math.max(1, Math.min(20, k));
   try {
@@ -50,11 +51,19 @@ export async function retrieveRelevantChunksWithScores(
 
     const embeddingStr = `[${embedding.join(",")}]`;
 
+    const toPgArray = (arr: string[]) =>
+      `{${arr.map((s) => `"${s.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`).join(",")}}`;
+
+    const excludeClause = excludeDocIds.length > 0
+      ? sql`WHERE cc.doc_id <> ALL(${toPgArray(excludeDocIds)}::text[])`
+      : sql``;
+
     const results = await db.execute(sql`
       SELECT cc.content, cc.doc_id, cd.title,
              (1 - (cc.embedding <=> ${embeddingStr}::vector)) AS score
       FROM corpus_chunks cc
       LEFT JOIN corpus_documents cd ON cd.doc_id = cc.doc_id
+      ${excludeClause}
       ORDER BY cc.embedding <=> ${embeddingStr}::vector
       LIMIT ${limit}
     `);
@@ -68,6 +77,35 @@ export async function retrieveRelevantChunksWithScores(
       }));
   } catch (err) {
     logger.warn({ err }, "RAG retrieval failed, continuing without context");
+    return [];
+  }
+}
+
+/**
+ * Fetch ALL chunks for the given document IDs, ordered by docId then chunk_index.
+ * Used to force-inject specific corpus docs into context (bypasses similarity search).
+ * Score is set to 1.0 to mark these as guaranteed-injected for debug logging.
+ */
+export async function getAllChunksForDocs(docIds: string[]): Promise<RetrievedChunk[]> {
+  if (docIds.length === 0) return [];
+  try {
+    const docIdsLiteral = `{${docIds.map((s) => `"${s.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`).join(",")}}`;
+    const results = await db.execute(sql`
+      SELECT cc.content, cc.doc_id, cd.title, cc.chunk_index
+      FROM corpus_chunks cc
+      LEFT JOIN corpus_documents cd ON cd.doc_id = cc.doc_id
+      WHERE cc.doc_id = ANY(${docIdsLiteral}::text[])
+      ORDER BY cc.doc_id, cc.chunk_index
+    `);
+    return (results.rows as Array<{ content: string; doc_id: string; title: string | null }>)
+      .map((r) => ({
+        docId: r.doc_id,
+        title: r.title ?? r.doc_id,
+        content: r.content,
+        score: 1,
+      }));
+  } catch (err) {
+    logger.warn({ err, docIds }, "Force-inject chunk fetch failed");
     return [];
   }
 }

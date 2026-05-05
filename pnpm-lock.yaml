@@ -40,7 +40,7 @@ catalogs:
       specifier: ^2.1.1
       version: 2.1.1
     drizzle-orm:
-      specifier: ^0.45.2
+      specifier: 0.45.2
       version: 0.45.2
     framer-motion:
       specifier: ^12.23.24
@@ -734,6 +734,9 @@ importers:
       '@xenova/transformers':
         specifier: ^2.17.2
         version: 2.17.2
+      drizzle-orm:
+        specifier: 'catalog:'
+        version: 0.45.2(@types/pg@8.18.0)(pg@8.20.0)
       pg:
         specifier: ^8.20.0
         version: 8.20.0
@@ -741,6 +744,12 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 25.3.5
+      '@workspace/api-server':
+        specifier: workspace:*
+        version: link:../artifacts/api-server
+      '@workspace/db':
+        specifier: workspace:*
+        version: link:../lib/db
       tsx:
         specifier: 'catalog:'
         version: 4.21.0

@@ -8,6 +8,8 @@ pnpm install --frozen-lockfile
 if [ -n "$DATABASE_URL" ] && command -v psql >/dev/null 2>&1; then
   psql "$DATABASE_URL" <<'SQL'
 ALTER TABLE IF EXISTS task_launcher_cards ADD COLUMN IF NOT EXISTS task_chain_prompt text;
+ALTER TABLE IF EXISTS task_launcher_cards ADD COLUMN IF NOT EXISTS corpus_doc_ids text[];
+ALTER TABLE IF EXISTS conversation_metadata ADD COLUMN IF NOT EXISTS task_launcher_card_id uuid;
 
 CREATE TABLE IF NOT EXISTS retrieval_debug_log (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),

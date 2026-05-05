@@ -6,6 +6,7 @@ export const taskLauncherCardsTable = pgTable("task_launcher_cards", {
   description: text("description").notNull(),
   displayOrder: integer("display_order").notNull(),
   taskChainPrompt: text("task_chain_prompt"),
+  corpusDocIds: text("corpus_doc_ids").array(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

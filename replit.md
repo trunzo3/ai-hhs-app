@@ -104,13 +104,15 @@ The system prompt is split into 4 layers stored in the database (editable via ad
 4. **Layer 4:** User Context (county, service category injected per user)
 5. **Layer 5 (optional):** Task-chain prompt — when a chat originates from a task launcher card, the per-card `task_chain_prompt` (admin-editable column on `task_launcher_cards`) is appended. Replaces the previously hardcoded `TASK_CHAINS` map in `systemPrompt.ts`.
 
+**Force-injected corpus docs (per task launcher card):** Each `task_launcher_cards` row also has a `corpus_doc_ids text[]` column. When a conversation is launched from a card, every chunk of those pinned docs is injected at the top of Layer 3 (tagged `source:"forced"`, score=1) and the same docIds are excluded from the similarity-based RAG search to avoid duplication. The card binding is persisted on `conversation_metadata.task_launcher_card_id` (UUID) so admins can edit `corpus_doc_ids` mid-conversation and the next user turn picks up the change. Deleting a corpus doc that is referenced by any card returns HTTP 409 with the list of referencing cards; the admin UI shows a confirmation modal whose "Delete & unpin" action passes `?force=true` to atomically delete the doc and strip its docId from every card's array.
+
 ### Admin Dashboard
 
 Tabbed interface at `/admin`:
 - **Inbox** — "Get in Touch" inquiries + file upload errors/feedback
 - **Dashboard** — Summary cards, sparkline trend charts, breakdowns by county/service category, task launcher rankings, unmatched domain registrations
 - **Users** — Filterable/sortable user table, enable/disable accounts, generate password-reset URL per user
-- **Settings** — Model controls (active model + spend threshold + support contact email), corpus document management with on-demand "Test retrieval" panel, task launcher card editor (title/description/task-chain prompt per card), system prompt editor with diff view before saving, retrieval debug section (toggle on to log every chat retrieval to `retrieval_debug_log` — query + chunks + scores — viewable in admin)
+- **Settings** — Model controls (active model + spend threshold + support contact email), corpus document management with on-demand "Test retrieval" panel, task launcher card editor (title/description/task-chain prompt + force-injected corpus document multi-select per card), system prompt editor with diff view before saving, retrieval debug section (toggle on to log every chat retrieval to `retrieval_debug_log` — query + chunks + scores, with `source:"forced"|"rag"` labels — viewable in admin)
 
 ---
 

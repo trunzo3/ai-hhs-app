@@ -9,6 +9,7 @@ export const conversationMetadataTable = pgTable("conversation_metadata", {
   startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
   messageCount: integer("message_count").notNull().default(0),
   taskLauncherUsed: text("task_launcher_used"),
+  taskLauncherCardId: uuid("task_launcher_card_id"),
   corpusDocsRetrieved: text("corpus_docs_retrieved").array().default([]),
 });
 

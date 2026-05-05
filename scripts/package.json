@@ -9,11 +9,14 @@
   },
   "devDependencies": {
     "@types/node": "catalog:",
+    "@workspace/api-server": "workspace:*",
+    "@workspace/db": "workspace:*",
     "tsx": "catalog:"
   },
   "dependencies": {
     "@types/pg": "^8.18.0",
     "@xenova/transformers": "^2.17.2",
+    "drizzle-orm": "catalog:",
     "pg": "^8.20.0"
   }
 }
