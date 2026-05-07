@@ -117,17 +117,31 @@ export default function Chat() {
     return () => window.removeEventListener("keydown", onKey);
   }, [showSecurityModal, showGetInTouchModal]);
 
+  // Track the user's scroll *intent* across the whole streaming session.
+  // Disable auto-scroll the moment the user scrolls up; re-enable it the
+  // moment they scroll back near the bottom. A per-render position check is
+  // not enough because streaming re-renders the message list many times per
+  // second and can race with the user's scrolling.
+  const [autoScrollEnabled, setAutoScrollEnabled] = useState(true);
+
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
-    // Only auto-scroll if the user is already near the bottom. This keeps the
-    // view "sticky" during streaming without yanking the user back if they've
-    // scrolled up to re-read earlier content.
-    const isNearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 100;
-    if (isNearBottom) {
+    const handleScroll = () => {
+      const isNearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 100;
+      setAutoScrollEnabled(isNearBottom);
+    };
+    el.addEventListener("scroll", handleScroll);
+    return () => el.removeEventListener("scroll", handleScroll);
+  }, []);
+
+  useEffect(() => {
+    if (!autoScrollEnabled) return;
+    const el = scrollRef.current;
+    if (el) {
       el.scrollTop = el.scrollHeight;
     }
-  }, [messages]);
+  }, [messages, autoScrollEnabled]);
 
   const handleNewChat = () => {
     startConvMutation.mutate({ data: {} }, {

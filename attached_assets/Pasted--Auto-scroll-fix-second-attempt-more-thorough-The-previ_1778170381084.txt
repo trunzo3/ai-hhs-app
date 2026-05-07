@@ -1,0 +1,73 @@
+# Auto-scroll fix — second attempt (more thorough)
+
+The previous fix (position check on every effect run) didn't work. The auto-scroll is still snapping the user back to the bottom during streaming.
+
+## Likely cause
+
+The streaming response re-renders the entire message list on every token. That re-render can reset scroll position regardless of position checks. Just checking "am I near the bottom" on every effect isn't enough — you need to track the user's scroll *intent* across the whole streaming session.
+
+## The fix
+
+Use a state flag to track whether auto-scroll should be active. Disable it when the user scrolls up. Re-enable it when they scroll back to the bottom.
+
+In `artifacts/aiforrhhs/src/pages/Chat.tsx`:
+
+1. Add state for auto-scroll behavior:
+
+```javascript
+const [autoScrollEnabled, setAutoScrollEnabled] = useState(true);
+const scrollContainerRef = useRef<HTMLDivElement>(null);
+```
+
+2. Add a scroll event listener on the scroll container. When the user scrolls, check whether they're near the bottom:
+
+```javascript
+useEffect(() => {
+  const el = scrollContainerRef.current;
+  if (!el) return;
+  
+  const handleScroll = () => {
+    const isNearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 100;
+    setAutoScrollEnabled(isNearBottom);
+  };
+  
+  el.addEventListener('scroll', handleScroll);
+  return () => el.removeEventListener('scroll', handleScroll);
+}, []);
+```
+
+3. Replace the existing message-update auto-scroll effect with one that checks the flag:
+
+```javascript
+useEffect(() => {
+  if (!autoScrollEnabled) return;
+  const el = scrollContainerRef.current;
+  if (el) {
+    el.scrollTop = el.scrollHeight;
+  }
+}, [messages, autoScrollEnabled]);
+```
+
+4. Make sure `scrollContainerRef` is attached to the actual scrolling container (the chat area, not the outer wrapper). It needs to be on the element that has `overflow-y: auto` or `overflow-y: scroll`.
+
+## Diagnostic step before changing anything
+
+Before applying the fix, paste back into the chat what is currently in `Chat.tsx`:
+
+1. Every `useEffect` that touches scroll behavior
+2. Every `ref` related to scrolling (`messagesEndRef`, `scrollContainerRef`, etc.)
+3. The JSX where those refs are attached
+
+This will show whether the previous fix was applied at all, applied to the wrong place, or applied correctly but the scrolling logic has multiple competing triggers.
+
+## After the fix
+
+Show me the modified code — the new `useEffect` blocks and the ref declarations. Don't just confirm complete; paste the lines.
+
+## Test
+
+1. Start a conversation that produces a long streaming response.
+2. While streaming, scroll up to the top of the response. Stay there.
+3. Wait for streaming to complete. Confirm: page did NOT yank back to bottom.
+4. Scroll back down to bottom manually.
+5. Send a new message. Confirm: page DOES auto-scroll to follow the new response.
