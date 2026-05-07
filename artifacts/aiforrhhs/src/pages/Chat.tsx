@@ -118,7 +118,15 @@ export default function Chat() {
   }, [showSecurityModal, showGetInTouchModal]);
 
   useEffect(() => {
-    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    const el = scrollRef.current;
+    if (!el) return;
+    // Only auto-scroll if the user is already near the bottom. This keeps the
+    // view "sticky" during streaming without yanking the user back if they've
+    // scrolled up to re-read earlier content.
+    const isNearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 100;
+    if (isNearBottom) {
+      el.scrollTop = el.scrollHeight;
+    }
   }, [messages]);
 
   const handleNewChat = () => {
