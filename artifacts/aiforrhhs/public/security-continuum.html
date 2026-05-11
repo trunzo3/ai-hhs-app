@@ -215,9 +215,9 @@
     transition: all 0.3s ease;
     z-index: 10;
     box-shadow: 0 12px 40px rgba(0,0,0,0.45);
-    /* Keep the callout within the viewport on short screens so the title
-       stays reachable; scroll inside the card if the content overflows. */
-    max-height: calc(100vh - 80px);
+    /* max-height is set dynamically by the script at the bottom of the file
+       so the callout fits the actual space between the dot and the viewport
+       edge it grows toward. Overflow + scrollbar theming stay in CSS. */
     overflow-y: auto;
     overflow-x: hidden;
     scrollbar-width: thin;
@@ -592,6 +592,40 @@
 
   <p class="current-date">Current as of April 2026</p>
 </div>
+
+<script>
+  // Dynamically constrain each callout's max-height to the space actually
+  // available between the dot and the viewport edge it grows toward.
+  // Above-cards (HHS) grow upward; below-cards grow downward.
+  (function () {
+    var BREATHING_ROOM = 20;
+    var activePoint = null;
+
+    function applyMaxHeight(point) {
+      var dot = point.querySelector('.dot');
+      var card = point.querySelector('.card');
+      if (!dot || !card) return;
+      var dotRect = dot.getBoundingClientRect();
+      var available = point.classList.contains('above')
+        ? dotRect.top - BREATHING_ROOM
+        : window.innerHeight - dotRect.bottom - BREATHING_ROOM;
+      if (available < 80) available = 80;
+      card.style.maxHeight = available + 'px';
+    }
+
+    document.querySelectorAll('.point').forEach(function (point) {
+      var open = function () { activePoint = point; applyMaxHeight(point); };
+      var close = function () { if (activePoint === point) activePoint = null; };
+      point.addEventListener('mouseenter', open);
+      point.addEventListener('click', open);
+      point.addEventListener('mouseleave', close);
+    });
+
+    window.addEventListener('resize', function () {
+      if (activePoint) applyMaxHeight(activePoint);
+    });
+  })();
+</script>
 
 </body>
 </html>

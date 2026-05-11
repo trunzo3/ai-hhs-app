@@ -1,0 +1,35 @@
+# Replit Prompt — Security Spectrum Callout Scroll Fix
+
+**Background:** Clicking a dot on the security spectrum opens a callout that can clip at the top of the viewport when its content is taller than the space available between the dot and the top of the screen. Screenshot attached for reference.
+
+**Goal:** Keep the callout visually anchored exactly where it currently appears relative to the dot. The only behavioral change: dynamically constrain the callout's maximum height to the vertical space actually available above the dot, so the callout always fits within the viewport and scrolls internally when content is too tall.
+
+**File:** Likely `security-continuum.html` (the page loaded in the Security modal's iframe). Confirm the file before editing.
+
+**Changes:**
+
+1. In the JavaScript click handler that opens the callout, add this height calculation:
+
+   ```js
+   const dotRect = dot.getBoundingClientRect();
+   const availableHeight = dotRect.top - 20;  // 20px breathing room from viewport top
+   callout.style.maxHeight = availableHeight + 'px';
+   ```
+
+2. Remove the static `max-height: calc(100vh - 80px)` rule from the callout's CSS — the inline JS value supersedes it.
+
+3. Keep the existing `overflow-y: auto` and scrollbar theming.
+
+4. Add a `resize` event listener that recomputes and reapplies `maxHeight` while a callout is open, so the callout adapts when the user resizes the browser.
+
+**Scope:** Preserve the callout's existing position, anchoring, border-radius, padding, background, typography, and the spectrum dots' click behavior. Only the `maxHeight` calculation method and the resize listener are new.
+
+**Verification:**
+
+1. Click the gold "Security" pill
+2. Click the "AI FOR HHS" dot — confirm the full callout fits within the viewport
+3. Confirm scrolling works in both directions when content exceeds the available height
+4. Click each other spectrum dot — confirm each callout fits within the viewport
+5. Resize the browser to a shorter height while a callout is open — confirm it adapts
+
+Show me the diff before applying.
