@@ -215,7 +215,22 @@
     transition: all 0.3s ease;
     z-index: 10;
     box-shadow: 0 12px 40px rgba(0,0,0,0.45);
+    /* Keep the callout within the viewport on short screens so the title
+       stays reachable; scroll inside the card if the content overflows. */
+    max-height: calc(100vh - 80px);
+    overflow-y: auto;
+    overflow-x: hidden;
+    scrollbar-width: thin;
+    scrollbar-color: #C8963E transparent;
   }
+
+  .card::-webkit-scrollbar { width: 6px; }
+  .card::-webkit-scrollbar-track { background: transparent; }
+  .card::-webkit-scrollbar-thumb {
+    background: #C8963E;
+    border-radius: 3px;
+  }
+  .card::-webkit-scrollbar-thumb:hover { background: #D4A958; }
 
   .point.below .card {
     top: calc(50% + 80px);
