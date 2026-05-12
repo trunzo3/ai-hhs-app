@@ -1,0 +1,78 @@
+# Replit Prompt — Security Modal Runtime Diagnostic (no edits)
+
+**Do not change any code.** I need the actual rendered values to figure out why the modal is still oversized.
+
+**Goal:** Report the runtime state of the security modal after the page has fully loaded and the dynamic padding script has finished running.
+
+**Files involved:**
+- `artifacts/aiforrhhs/public/security-continuum.html`
+- `artifacts/aiforrhhs/src/pages/Chat.tsx`
+
+---
+
+## Report back the following
+
+### 1. Computed CSS on `body`
+
+After the iframe loads, read `getComputedStyle(document.body)` and report the values for these properties:
+
+- `padding-top`
+- `padding-bottom`
+- `min-height`
+- `height`
+- `display`
+- `flex-direction`
+- `justify-content`
+- `align-items`
+
+This tells me what the CSS is actually applying — the prompt may not have been followed exactly, or there may be a property I overlooked.
+
+### 2. Body dimensions
+
+- `document.body.clientHeight`
+- `document.body.offsetHeight`
+- `document.body.scrollHeight`
+
+### 3. Iframe dimensions
+
+- `window.innerHeight` (the iframe's viewport height)
+- The current React state value `securityIframeHeight` in `Chat.tsx`
+- The actual rendered height of the iframe DOM element (via `iframe.getBoundingClientRect().height` from the parent)
+
+### 4. Card positions
+
+For each of the 4 cards (`.p-consumer .card`, `.p-enterprise .card`, `.p-hhs .card`, `.p-zdr .card`), report:
+
+- `card.getBoundingClientRect().top` (viewport-relative)
+- `card.getBoundingClientRect().bottom` (viewport-relative)
+- `card.getBoundingClientRect().height` (the card's actual rendered height)
+- `card.offsetTop` (position relative to its offset parent)
+
+### 5. Dot positions
+
+For each of the 4 dots (`.p-consumer .dot`, `.p-enterprise .dot`, `.p-hhs .dot`, `.p-zdr .dot`), report:
+
+- `dot.getBoundingClientRect().top`
+- `dot.getBoundingClientRect().bottom`
+
+### 6. When the measurements are taken
+
+Take all measurements:
+1. Immediately after `window.load` fires (BEFORE the dynamic padding script runs), AND
+2. After the dynamic padding script finishes (200ms after load, to be safe)
+
+Two passes, both reported.
+
+---
+
+## How to run it
+
+Add a temporary diagnostic script inside `security-continuum.html` that runs the measurements at both points and either:
+- Logs everything via `postMessage` to the parent so it shows in Replit's parent-frame console capture, OR
+- Sends to a `console.log` that Replit can capture from the iframe (if iframe console capture is possible)
+
+Whichever works in Replit's logging environment.
+
+**Open the security modal once after the workflow restarts**, so the iframe loads and the diagnostic fires.
+
+Report all values in a single response. Remove the temporary diagnostic afterward.

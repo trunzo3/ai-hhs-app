@@ -122,6 +122,23 @@ export default function Chat() {
     function handleMessage(event: MessageEvent) {
       // Validate origin (same-origin iframe), shape, and bounds before applying.
       if (event.origin !== window.location.origin) return;
+      // [DIAGNOSTIC — temporary] Capture iframe-runtime snapshot from security-continuum.html.
+      if (event.data?.type === "security-diag-report") {
+        const ifr = document.querySelector(
+          'iframe[src*="security-continuum"]',
+        ) as HTMLIFrameElement | null;
+        const parentInfo = ifr
+          ? {
+              iframeStyleHeight: ifr.style.height || null,
+              iframeRectHeight: Math.round(ifr.getBoundingClientRect().height),
+            }
+          : { iframeStyleHeight: null, iframeRectHeight: null };
+        console.log(
+          "[SECURITY-DIAG-REPORT]",
+          JSON.stringify({ ...event.data, parent: parentInfo }),
+        );
+        return;
+      }
       if (event.data?.type !== "security-continuum-height") return;
       const h = event.data.height;
       if (typeof h !== "number" || !Number.isFinite(h)) return;

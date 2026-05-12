@@ -578,6 +578,62 @@
   <p class="current-date">Current as of April 2026</p>
 </div>
 
+<!-- [DIAGNOSTIC — temporary] Reports runtime body/card/dot state to parent.
+     Registered BEFORE the existing reportHeight script so its 'load' handler
+     fires first (browsers invoke 'load' listeners in registration order),
+     letting us capture a 'before-padding' snapshot. -->
+<script>
+(function () {
+  function measure(label) {
+    var bodyCS = getComputedStyle(document.body);
+    var report = {
+      type: 'security-diag-report',
+      label: label,
+      computedBody: {
+        paddingTop: bodyCS.paddingTop,
+        paddingBottom: bodyCS.paddingBottom,
+        minHeight: bodyCS.minHeight,
+        height: bodyCS.height,
+        display: bodyCS.display,
+        flexDirection: bodyCS.flexDirection,
+        justifyContent: bodyCS.justifyContent,
+        alignItems: bodyCS.alignItems,
+      },
+      bodyDims: {
+        clientHeight: document.body.clientHeight,
+        offsetHeight: document.body.offsetHeight,
+        scrollHeight: document.body.scrollHeight,
+      },
+      innerHeight: window.innerHeight,
+      cards: {},
+      dots: {},
+    };
+    ['consumer', 'enterprise', 'hhs', 'zdr'].forEach(function (k) {
+      var card = document.querySelector('.p-' + k + ' .card');
+      var dot = document.querySelector('.p-' + k + ' .dot');
+      if (card) {
+        var r = card.getBoundingClientRect();
+        report.cards[k] = {
+          top: Math.round(r.top),
+          bottom: Math.round(r.bottom),
+          height: Math.round(r.height),
+          offsetTop: card.offsetTop,
+        };
+      } else { report.cards[k] = null; }
+      if (dot) {
+        var dr = dot.getBoundingClientRect();
+        report.dots[k] = { top: Math.round(dr.top), bottom: Math.round(dr.bottom) };
+      } else { report.dots[k] = null; }
+    });
+    window.parent.postMessage(report, window.location.origin);
+  }
+  window.addEventListener('load', function () {
+    measure('before-padding');
+    setTimeout(function () { measure('after-padding'); }, 200);
+  });
+})();
+</script>
+
 <script>
   function reportHeight() {
     // [DIAGNOSTIC — temporary] Measure each popover at natural size and
