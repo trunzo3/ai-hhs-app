@@ -12,12 +12,15 @@
     font-family: 'DM Sans', sans-serif;
     background: #0F1A2E;
     color: #E8ECF2;
-    min-height: 100vh;
+    /* No min-height: 100vh and no justify-content: center.
+       Body height = padding-top + content + padding-bottom, driven entirely
+       by content. The script below sets vertical padding dynamically so each
+       popover has exactly enough room (no overshoot, no clipping). */
     display: flex;
     flex-direction: column;
     align-items: center;
-    justify-content: center;
-    padding: 300px 24px;
+    /* Baseline vertical padding (40px); the script overwrites it on load/resize. */
+    padding: 40px 24px;
     overflow-x: hidden;
   }
 
@@ -579,6 +582,50 @@
 </div>
 
 <script>
+  // Visual margin between the popover's outermost edge and the modal edge.
+  var TARGET_MARGIN = 40;
+  // Baseline body padding declared in CSS; the script reads natural positions
+  // against this baseline before extending it.
+  var BASELINE_PADDING = 40;
+
+  function setDynamicPadding() {
+    // Reset to baseline so we measure the cards' natural positions, not their
+    // positions relative to whatever padding we set on the previous run.
+    document.body.style.paddingTop = BASELINE_PADDING + 'px';
+    document.body.style.paddingBottom = BASELINE_PADDING + 'px';
+    // Force layout flush.
+    void document.body.offsetHeight;
+
+    var neededTop = BASELINE_PADDING;
+    var neededBottom = BASELINE_PADDING;
+    var bodyHeight = document.body.offsetHeight;
+
+    // Above-popovers extend upward from their dot; if their top sits above the
+    // baseline padding, we need to push padding-top down by the overflow.
+    document.querySelectorAll('.point.above .card').forEach(function (card) {
+      var cardTop = card.getBoundingClientRect().top;
+      // cardTop is viewport-relative. The body's top edge is at viewport y=0
+      // (no offset parent). We want cardTop >= TARGET_MARGIN, so
+      //   needed = current padding-top + (TARGET_MARGIN - cardTop)
+      var needed = BASELINE_PADDING + (TARGET_MARGIN - cardTop);
+      if (needed > neededTop) neededTop = needed;
+    });
+
+    // Below-popovers extend downward; if the card's bottom passes the body's
+    // bottom edge, extend padding-bottom by the overflow.
+    document.querySelectorAll('.point.below .card').forEach(function (card) {
+      var cardBottom = card.getBoundingClientRect().bottom;
+      var overflow = (cardBottom - bodyHeight) + TARGET_MARGIN + BASELINE_PADDING;
+      if (overflow > neededBottom) neededBottom = overflow;
+    });
+
+    document.body.style.paddingTop = neededTop + 'px';
+    document.body.style.paddingBottom = neededBottom + 'px';
+
+    // Body height changed — tell the parent so it can resize the iframe.
+    setTimeout(reportHeight, 50);
+  }
+
   function reportHeight() {
     // Same-origin iframe — target the parent's exact origin instead of '*'.
     window.parent.postMessage({
@@ -586,16 +633,18 @@
       height: document.body.scrollHeight,
     }, window.location.origin);
   }
-  // Re-measure once fonts have actually loaded (DM Sans / DM Serif Display
-  // come from Google Fonts and may not be ready when `load` fires).
+
+  // Run once on load, again after web fonts settle (DM Sans / DM Serif Display
+  // arrive after the initial 'load' event), and once more 500ms later as a
+  // safety net for any straggler layout shifts.
   window.addEventListener('load', function () {
-    reportHeight();
+    setDynamicPadding();
     if (document.fonts && document.fonts.ready) {
-      document.fonts.ready.then(reportHeight);
+      document.fonts.ready.then(setDynamicPadding);
     }
-    setTimeout(reportHeight, 500);
+    setTimeout(setDynamicPadding, 500);
   });
-  window.addEventListener('resize', reportHeight);
+  window.addEventListener('resize', setDynamicPadding);
 </script>
 
 </body>

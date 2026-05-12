@@ -66,7 +66,11 @@ export default function Chat() {
   const [gitSubmitting, setGitSubmitting] = useState(false);
 
   const [showSecurityModal, setShowSecurityModal] = useState(false);
-  const [securityIframeHeight, setSecurityIframeHeight] = useState(1400);
+  // Start small. The iframe's body has `min-height` removed, so its scrollHeight
+  // is driven by content; once it loads it postMessages back the real height
+  // and we resize. Starting at 100 prevents the previous self-reinforcing loop
+  // where a 1400 default would lock the body's `min-height: 100vh` at 1400px.
+  const [securityIframeHeight, setSecurityIframeHeight] = useState(100);
 
   const [taskCards, setTaskCards] = useState<TaskCardData[]>([]);
 
