@@ -1,0 +1,85 @@
+# Replit Prompt — Dynamic Padding (One-Shot Fix)
+
+**Background:** The body in `security-continuum.html` currently uses a static `padding: 300px 24px` to give popovers room to render. This is fragile — the popovers' actual rendered heights depend on content, font rendering, and viewport width, and a static value either overshoots (excess blank space) or undershoots (clipping). The fix is to compute the padding dynamically from the popovers' actual measured positions at runtime, so it's always exactly right.
+
+**Goal:** Replace the static body padding with a dynamic calculation that measures each popover's natural position and sets the body's `padding-top` and `padding-bottom` to exactly fit them with a small visual margin. Also remove the flex centering on body so the layout math is predictable.
+
+**File:** `artifacts/aiforrhhs/public/security-continuum.html`
+
+---
+
+## Changes
+
+### 1. Update the `body` CSS rule
+
+- **Remove** `justify-content: center;` from the body rule
+- **Change** the padding line from `padding: 300px 24px;` to `padding: 40px 24px;` (vertical values are just a baseline — the script below will override them)
+- **Keep** everything else (`min-height: 100vh`, `display: flex`, `flex-direction: column`, `align-items: center`, `overflow-x: hidden`)
+
+### 2. Replace the existing inline `<script>` at the end of `<body>`
+
+Replace the current postMessage script with this:
+
+```html
+<script>
+  var TARGET_MARGIN = 40;
+
+  function setDynamicPadding() {
+    // Reset vertical padding to baseline so we can measure natural positions
+    document.body.style.paddingTop = '40px';
+    document.body.style.paddingBottom = '40px';
+
+    // Force layout recalculation
+    void document.body.offsetHeight;
+
+    var neededPaddingTop = 40;
+    var neededPaddingBottom = 40;
+    var bodyHeight = document.body.offsetHeight;
+
+    // Above-popovers: measure how far each card's top is from viewport top
+    document.querySelectorAll('.point.above .card').forEach(function (card) {
+      var cardTop = card.getBoundingClientRect().top;
+      var needed = TARGET_MARGIN - cardTop + 40;  // +40 because that's the current baseline padding-top
+      if (needed > neededPaddingTop) neededPaddingTop = needed;
+    });
+
+    // Below-popovers: measure how far each card's bottom extends past body bottom
+    document.querySelectorAll('.point.below .card').forEach(function (card) {
+      var cardBottom = card.getBoundingClientRect().bottom;
+      var overflow = cardBottom - bodyHeight + TARGET_MARGIN + 40;
+      if (overflow > neededPaddingBottom) neededPaddingBottom = overflow;
+    });
+
+    document.body.style.paddingTop = neededPaddingTop + 'px';
+    document.body.style.paddingBottom = neededPaddingBottom + 'px';
+
+    // Report new body height to parent so iframe resizes
+    setTimeout(reportHeight, 50);
+  }
+
+  function reportHeight() {
+    window.parent.postMessage({
+      type: 'security-continuum-height',
+      height: document.body.scrollHeight
+    }, '*');
+  }
+
+  window.addEventListener('load', setDynamicPadding);
+  window.addEventListener('resize', setDynamicPadding);
+</script>
+```
+
+---
+
+## Scope
+
+Only the body CSS rule and the inline script in `security-continuum.html`. Don't touch `Chat.tsx` or anything else.
+
+## Verification
+
+1. Open the chat page and click the gold "Security" pill
+2. Hover the "AI FOR HHS" dot — confirm the popover renders fully with no clipping AND with only a small visual margin (about 40px) between the popover top and the top of the modal. Same check at the bottom for below-popovers.
+3. Hover each below-dot (Consumer, Enterprise, Zero Retention) — confirm same behavior
+4. Resize the browser narrower so popover text wraps to more lines (popover gets taller) — confirm the padding adjusts automatically and the popover still fits
+
+Show me the diff before applying.
