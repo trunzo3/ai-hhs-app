@@ -122,33 +122,10 @@ export default function Chat() {
     function handleMessage(event: MessageEvent) {
       // Validate origin (same-origin iframe), shape, and bounds before applying.
       if (event.origin !== window.location.origin) return;
-      // [DIAGNOSTIC — temporary] Capture iframe-runtime snapshot from security-continuum.html.
-      if (event.data?.type === "security-diag-report") {
-        const ifr = document.querySelector(
-          'iframe[src*="security-continuum"]',
-        ) as HTMLIFrameElement | null;
-        const parentInfo = ifr
-          ? {
-              iframeStyleHeight: ifr.style.height || null,
-              iframeRectHeight: Math.round(ifr.getBoundingClientRect().height),
-            }
-          : { iframeStyleHeight: null, iframeRectHeight: null };
-        console.log(
-          "[SECURITY-DIAG-REPORT]",
-          JSON.stringify({ ...event.data, parent: parentInfo }),
-        );
-        return;
-      }
       if (event.data?.type !== "security-continuum-height") return;
       const h = event.data.height;
       if (typeof h !== "number" || !Number.isFinite(h)) return;
       const clamped = Math.max(400, Math.min(h, 10000));
-      // [DIAGNOSTIC — temporary] Log everything received, including iframe-side measurements.
-      console.log(
-        "[SECURITY-DIAG] bodyScrollHeight=" + h +
-        " clamped=" + clamped +
-        " diag=" + JSON.stringify((event.data as any)._diag ?? null)
-      );
       setSecurityIframeHeight(clamped);
     }
     window.addEventListener("message", handleMessage);
