@@ -1,0 +1,110 @@
+# Replit Prompt — Security Modal Natural-Size Refactor
+
+**Background:** The security modal currently has a fixed `height: 90vh`, the iframe fills that height, and the popovers inside use internal scroll (`overflow-y: auto`, dynamic `max-height` via JS) to fit content into the constrained space. This is the wrong design. The right design: the modal grows to its natural content height, popovers render at full size with no internal scroll, and if the viewport is too short to show the modal, the user scrolls the page — the standard tall-modal pattern.
+
+**Goal:** Refactor the architecture so (1) popovers render at full natural height with no internal scroll, (2) the modal grows to fit its content, and (3) the outer wrapper provides page-level scrolling when the modal exceeds viewport height.
+
+**Files to change:**
+- `artifacts/aiforrhhs/public/security-continuum.html`
+- `artifacts/aiforrhhs/src/pages/Chat.tsx` (the security modal section)
+
+---
+
+## Changes in `security-continuum.html`
+
+1. **Strip all internal-scroll behavior from `.card`.** From the `.card` rule, remove:
+   - `overflow-y: auto`
+   - `overflow-x: hidden`
+   - `scrollbar-width: thin`
+   - `scrollbar-color: #C8963E transparent`
+
+   Also remove these rules entirely:
+   - `.card::-webkit-scrollbar`
+   - `.card::-webkit-scrollbar-track`
+   - `.card::-webkit-scrollbar-thumb`
+   - `.card::-webkit-scrollbar-thumb:hover`
+
+   Confirm no `max-height` declaration remains on `.card`.
+
+2. **Delete the entire inline `<script>` block at the bottom of `<body>`** — the one containing the `applyMaxHeight` function and the `mouseenter` / `click` / `mouseleave` / `resize` listeners.
+
+3. **Add vertical padding to body** so absolutely-positioned popovers have room to render in positive coordinate space. Update the `body` rule so the final padding is `padding: 500px 24px;` (was `padding: 40px 24px;`). Keep all other body properties (`min-height`, `display: flex`, `flex-direction`, `align-items`, `justify-content`, `overflow-x: hidden`) as they are.
+
+4. **Add a new inline `<script>` at the end of `<body>`** that reports the body's content height to the parent via postMessage:
+
+   ```html
+   <script>
+     function reportHeight() {
+       window.parent.postMessage({
+         type: 'security-continuum-height',
+         height: document.body.scrollHeight
+       }, '*');
+     }
+     window.addEventListener('load', reportHeight);
+     window.addEventListener('resize', reportHeight);
+   </script>
+   ```
+
+---
+
+## Changes in `Chat.tsx`
+
+1. **Remove `height: 90vh` and `overflow: 'hidden'`** from the modal panel div (the inner `<div>` that wraps the iframe).
+
+2. **Update the outer backdrop wrapper** (the `<div style={{ position: 'fixed', inset: 0, ... }}>` that currently surrounds the modal panel) so it allows page-level scrolling and centers the modal when it fits:
+   - Add `overflowY: 'auto'`
+   - Add `display: 'flex'`, `flexDirection: 'column'`, `alignItems: 'center'`
+   - Add `padding: '40px 20px'`
+
+3. **Give the modal panel `margin: 'auto 0'` and `flexShrink: 0`** so it centers vertically when content fits the wrapper and anchors to the top when content overflows.
+
+4. **Add React state for the iframe height**, defaulting to `1400`:
+
+   ```ts
+   const [securityIframeHeight, setSecurityIframeHeight] = useState(1400);
+   ```
+
+5. **Add a `useEffect`** that listens for postMessage events from the iframe with `type: 'security-continuum-height'`, updates the height state, and cleans up the listener on unmount:
+
+   ```ts
+   useEffect(() => {
+     function handleMessage(event: MessageEvent) {
+       if (event.data?.type === 'security-continuum-height' && typeof event.data.height === 'number') {
+         setSecurityIframeHeight(event.data.height);
+       }
+     }
+     window.addEventListener('message', handleMessage);
+     return () => window.removeEventListener('message', handleMessage);
+   }, []);
+   ```
+
+6. **Set the iframe's `height` style** to the state value (e.g., `style={{ width: '100%', height: securityIframeHeight, border: 'none', display: 'block' }}`).
+
+---
+
+## Scope
+
+Only the security modal in `Chat.tsx` and the `security-continuum.html` file. Don't touch any other modals, the rest of the chat interface, or unrelated styles.
+
+---
+
+## Verification
+
+1. **In a tall browser window (taller than 1500px):**
+   - Open the chat page and click the gold "Security" pill
+   - Confirm the modal opens, is vertically centered in the viewport, with blank space above and below the spectrum
+   - Hover the "AI FOR HHS" dot — confirm the popover renders at full natural size with no scrollbar inside it
+   - Hover each other dot (Consumer, Enterprise, Zero Retention) — confirm the same
+
+2. **In a short browser window (shorter than 800px):**
+   - Open the security modal
+   - Confirm the outer wrapper becomes scrollable — one scrollbar on the right side of the viewport
+   - Confirm you can scroll up and down to see the entire modal
+   - Confirm no scrolling happens inside any popover
+   - Confirm no scrolling happens inside the iframe itself
+
+3. **Confirm there are no double scrollbars anywhere** — exactly one scrollbar appears (on the outer wrapper), only when the modal exceeds viewport height.
+
+4. **Close and reopen the modal** — confirm the iframe height adjusts correctly via postMessage on each open.
+
+Show me the diff before applying.

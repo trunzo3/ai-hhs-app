@@ -66,6 +66,7 @@ export default function Chat() {
   const [gitSubmitting, setGitSubmitting] = useState(false);
 
   const [showSecurityModal, setShowSecurityModal] = useState(false);
+  const [securityIframeHeight, setSecurityIframeHeight] = useState(1400);
 
   const [taskCards, setTaskCards] = useState<TaskCardData[]>([]);
 
@@ -116,6 +117,20 @@ export default function Chat() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [showSecurityModal, showGetInTouchModal]);
+
+  useEffect(() => {
+    function handleMessage(event: MessageEvent) {
+      // Validate origin (same-origin iframe), shape, and bounds before applying.
+      if (event.origin !== window.location.origin) return;
+      if (event.data?.type !== "security-continuum-height") return;
+      const h = event.data.height;
+      if (typeof h !== "number" || !Number.isFinite(h)) return;
+      const clamped = Math.max(400, Math.min(h, 10000));
+      setSecurityIframeHeight(clamped);
+    }
+    window.addEventListener("message", handleMessage);
+    return () => window.removeEventListener("message", handleMessage);
+  }, []);
 
   // Track the user's scroll *intent* across the whole streaming session.
   // Disable auto-scroll the moment the user scrolls up; re-enable it the
@@ -592,16 +607,16 @@ export default function Chat() {
       {/* ── SECURITY MODAL ── */}
       {showSecurityModal && (
         <div
-          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.65)", zIndex: 1100, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.65)", zIndex: 1100, overflowY: "auto", display: "flex", flexDirection: "column", alignItems: "center", padding: "40px 20px" }}
           onClick={(e) => { if (e.target === e.currentTarget) setShowSecurityModal(false); }}
           data-testid="modal-security"
         >
-          <div style={{ position: "relative", background: "#0F1A2E", borderRadius: 14, width: "100%", maxWidth: 1180, height: "90vh", boxShadow: "0 24px 80px rgba(0,0,0,0.5)", overflow: "hidden", border: "1px solid #2A3A50" }}>
+          <div style={{ position: "relative", background: "#0F1A2E", borderRadius: 14, width: "100%", maxWidth: 1180, margin: "auto 0", flexShrink: 0, boxShadow: "0 24px 80px rgba(0,0,0,0.5)", border: "1px solid #2A3A50" }}>
             <ModalCloseButton onClick={() => setShowSecurityModal(false)} testId="btn-close-security" />
             <iframe
               src="/security-continuum.html"
               title="AI Data Security Continuum"
-              style={{ width: "100%", height: "100%", border: "none", display: "block", background: "#0F1A2E" }}
+              style={{ width: "100%", height: securityIframeHeight, border: "none", display: "block", background: "#0F1A2E" }}
               data-testid="iframe-security"
             />
           </div>
