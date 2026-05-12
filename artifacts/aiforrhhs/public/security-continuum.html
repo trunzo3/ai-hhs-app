@@ -580,29 +580,38 @@
 
 <script>
   function reportHeight() {
-    // [DIAGNOSTIC — temporary] Measure each popover at natural size.
-    var cards = {
-      consumer:   document.querySelector('.p-consumer .card'),
-      enterprise: document.querySelector('.p-enterprise .card'),
-      hhs:        document.querySelector('.p-hhs .card'),
-      zdr:        document.querySelector('.p-zdr .card'),
+    // [DIAGNOSTIC — temporary] Measure each popover at natural size and
+    // relay through postMessage so the parent can log them (iframe console
+    // logs aren't captured by the workspace logger).
+    var cardSelectors = {
+      consumer:   '.p-consumer .card',
+      enterprise: '.p-enterprise .card',
+      hhs:        '.p-hhs .card',
+      zdr:        '.p-zdr .card',
     };
-    var measurements = {};
-    Object.keys(cards).forEach(function (k) {
-      var el = cards[k];
-      measurements[k] = el ? Math.round(el.getBoundingClientRect().height) : null;
+    var cards = {};
+    Object.keys(cardSelectors).forEach(function (k) {
+      var el = document.querySelector(cardSelectors[k]);
+      cards[k] = el ? Math.round(el.getBoundingClientRect().height) : null;
     });
-    console.log('[POPOVER-HEIGHTS]', JSON.stringify(measurements),
-                'bodyScrollHeight=' + document.body.scrollHeight,
-                'innerHeight=' + window.innerHeight);
 
     // Same-origin iframe — target the parent's exact origin instead of '*'.
     window.parent.postMessage({
       type: 'security-continuum-height',
-      height: document.body.scrollHeight
+      height: document.body.scrollHeight,
+      // [DIAGNOSTIC — temporary]
+      _diag: { cards: cards, innerHeight: window.innerHeight },
     }, window.location.origin);
   }
-  window.addEventListener('load', reportHeight);
+  // Re-measure once fonts have actually loaded (DM Sans / DM Serif Display
+  // come from Google Fonts and may not be ready when `load` fires).
+  window.addEventListener('load', function () {
+    reportHeight();
+    if (document.fonts && document.fonts.ready) {
+      document.fonts.ready.then(reportHeight);
+    }
+    setTimeout(reportHeight, 500);
+  });
   window.addEventListener('resize', reportHeight);
 </script>
 
