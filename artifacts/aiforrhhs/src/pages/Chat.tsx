@@ -126,6 +126,8 @@ export default function Chat() {
       const h = event.data.height;
       if (typeof h !== "number" || !Number.isFinite(h)) return;
       const clamped = Math.max(400, Math.min(h, 10000));
+      // [DIAGNOSTIC — temporary] Log the height the parent receives.
+      console.log("[SECURITY-IFRAME-HEIGHT] received=" + h + " clamped=" + clamped);
       setSecurityIframeHeight(clamped);
     }
     window.addEventListener("message", handleMessage);

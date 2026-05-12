@@ -580,6 +580,22 @@
 
 <script>
   function reportHeight() {
+    // [DIAGNOSTIC — temporary] Measure each popover at natural size.
+    var cards = {
+      consumer:   document.querySelector('.p-consumer .card'),
+      enterprise: document.querySelector('.p-enterprise .card'),
+      hhs:        document.querySelector('.p-hhs .card'),
+      zdr:        document.querySelector('.p-zdr .card'),
+    };
+    var measurements = {};
+    Object.keys(cards).forEach(function (k) {
+      var el = cards[k];
+      measurements[k] = el ? Math.round(el.getBoundingClientRect().height) : null;
+    });
+    console.log('[POPOVER-HEIGHTS]', JSON.stringify(measurements),
+                'bodyScrollHeight=' + document.body.scrollHeight,
+                'innerHeight=' + window.innerHeight);
+
     // Same-origin iframe — target the parent's exact origin instead of '*'.
     window.parent.postMessage({
       type: 'security-continuum-height',
