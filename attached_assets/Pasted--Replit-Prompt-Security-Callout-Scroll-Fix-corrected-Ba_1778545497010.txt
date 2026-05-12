@@ -1,0 +1,47 @@
+# Replit Prompt — Security Callout Scroll Fix (corrected)
+
+**Background:** The current script in `security-continuum.html` uses the dot's viewport position as the reference point for the available-space calculation. But the card is anchored at its own bottom edge (CSS `bottom: calc(50% + 80px)` on `.point.above .card`), and that anchor sits ~63px above the dot's top. Using `dotRect.top - 20` as `available` overshoots by that ~63px, so the card's top edge still ends up above the iframe viewport. Content rendered above the viewport edge is unreachable — inside the card, scroll position starts at content-top, but content-top is clipped by the viewport, so "scroll up" does nothing.
+
+The fix: use the card's own anchored edge as the reference, not the dot.
+- For `.point.above .card`: anchored bottom — `available = card.getBoundingClientRect().bottom - 20`
+- For `.point.below .card`: anchored top — `available = window.innerHeight - card.getBoundingClientRect().top - 20`
+
+Also add a scroll listener on the iframe document so the card adapts when the user scrolls while a card is open.
+
+**File:** `artifacts/aiforrhhs/public/security-continuum.html` — the inline `<script>` block at the bottom of `<body>`.
+
+**Changes:**
+
+1. Replace the `applyMaxHeight` function with this version:
+
+   ```js
+   function applyMaxHeight(point) {
+     var card = point.querySelector('.card');
+     if (!card) return;
+     var cardRect = card.getBoundingClientRect();
+     var available = point.classList.contains('above')
+       ? cardRect.bottom - BREATHING_ROOM
+       : window.innerHeight - cardRect.top - BREATHING_ROOM;
+     if (available < 80) available = 80;
+     card.style.maxHeight = available + 'px';
+   }
+   ```
+
+2. Add a scroll listener next to the existing resize listener:
+
+   ```js
+   document.addEventListener('scroll', function () {
+     if (activePoint) applyMaxHeight(activePoint);
+   }, true);  // capture phase, catches body/window scrolls
+   ```
+
+**Scope:** Limit changes to the inline `<script>` block at the bottom of `security-continuum.html`. Preserve all CSS, DOM, and other JavaScript.
+
+**Verification:**
+
+1. Open the Security modal, hover the "AI FOR HHS" dot — confirm the card's top edge is fully visible (not clipped above the viewport) and you can scroll up and down inside the card to see all content
+2. Hover each other dot (Consumer, Enterprise, Zero Retention) — confirm same behavior
+3. Resize the outer browser to a shorter height — confirm the card adapts
+4. If the iframe body is tall enough to scroll, scroll within it while hovering a dot — confirm the card recomputes its maxHeight
+
+Show me the diff before applying.
